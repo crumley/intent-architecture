@@ -1,0 +1,20 @@
+# lychee — broken-link checker for this repo's Markdown.
+#
+# Links that matter here are internal relative paths, so we run in offline mode:
+# lychee verifies that each linked file exists on disk and makes no network
+# requests (fast, deterministic, CI-safe). External URLs are skipped by design.
+
+# Only check the local filesystem; never hit the network.
+offline = true
+
+# Validate `#heading` anchor fragments against the target document's headings.
+include_fragments = "anchor-only"
+
+# The skill lives under the hidden .agents/ directory, so hidden files must be
+# scanned.
+hidden = true
+
+# Don't descend into VCS internals. The skill's templates directory is excluded
+# because its files are skeletons whose relative links only resolve once
+# instantiated in a target repository.
+exclude_path = ['\.git/', '\.agents/skills/intent-architecture/references/templates/']

@@ -1,0 +1,29 @@
+# CI runs the same gates a developer runs locally:
+#   mise run check            — this repo's Markdown gate (dprint + lychee)
+#   mise run check (template) — the template's full gate, proving it is green
+#                               from a cold checkout for anyone who copies it.
+#
+# mise-action installs mise, reads mise.toml, and provisions the exact pinned
+# toolchain that `mise install` provisions on a laptop.
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      # Trust the template's nested mise.toml without an interactive prompt.
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: jdx/mise-action@v4
+
+      - run: mise run check
+
+      - run: mise install && mise run check
+        working-directory: template

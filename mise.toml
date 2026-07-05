@@ -1,0 +1,30 @@
+# Toolchain + tasks for this repo (mise). This repo is Markdown-only at the root;
+# the template under template/ carries its own mise.toml with the full code gate.
+#
+#   mise install     # provision the pinned tools (dprint, lychee)
+#   mise run fmt     # format all Markdown in place
+#   mise run check   # the no-writes gate — exactly what CI runs
+
+[tools]
+dprint = "0.54.0"
+lychee = "0.24.2"
+
+[tasks.fmt]
+description = "Format Markdown in place (dprint)"
+run = "dprint fmt"
+
+[tasks.lint]
+description = "Markdown format check, no writes (dprint)"
+run = "dprint check"
+
+[tasks.links]
+description = "Check Markdown links offline (lychee)"
+run = "lychee ."
+
+[tasks.check]
+description = "The full gate, no writes: lint + links (CI runs exactly this)"
+depends = ["lint", "links"]
+
+[tasks.template-check]
+description = "Prove the template's own gate is green from a cold copy"
+run = "mise --cd template install && mise --cd template run check"

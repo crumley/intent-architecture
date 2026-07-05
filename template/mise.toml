@@ -1,0 +1,32 @@
+# Toolchain + tasks (mise). One file pins the tool versions AND defines the
+# tasks, so local dev and CI provision the same versions and run the same
+# commands.
+#
+#   mise install     # provision the pinned toolchain (dprint, lychee)
+#   mise run fmt     # format everything in place as you write
+#   mise run check   # the full no-writes gate — exactly what CI runs
+#
+# The intent architecture itself only needs Markdown tooling. When the project
+# starts building code, pin the language toolchain here and grow the task DAG
+# (fmt/lint/typecheck/test feeding `check`) — record the choice as an ADR in
+# design/decisions/ (see CONTRIBUTING.md).
+
+[tools]
+dprint = "0.54.0"
+lychee = "0.24.2"
+
+[tasks.fmt]
+description = "Format Markdown in place (dprint)"
+run = "dprint fmt"
+
+[tasks.lint]
+description = "Markdown format check, no writes (dprint)"
+run = "dprint check"
+
+[tasks.links]
+description = "Check Markdown links offline (lychee)"
+run = "lychee ."
+
+[tasks.check]
+description = "The full gate, no writes: lint + links (CI runs exactly this)"
+depends = ["lint", "links"]

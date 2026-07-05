@@ -1,0 +1,22 @@
+# CI runs the same gate a developer runs locally: `mise run check`.
+#
+# mise-action installs mise, reads mise.toml, and provisions the exact pinned
+# toolchain (dprint, lychee) that `mise install` provisions on a laptop. The
+# single source of truth for "is this green?" is one command, byte-for-byte
+# identical locally and here. See mise.toml / CONTRIBUTING.md.
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: jdx/mise-action@v4
+
+      - run: mise run check
