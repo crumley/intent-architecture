@@ -4,10 +4,12 @@ description: >-
   Establish, bootstrap, or refactor any repository into the intent-governed four-leg structure —
   a durable `intent/` tree (vision, principles, glossary, concepts, subsystem contracts) that
   governs `design/` (the how + the chronological record of building it — design entries and ADRs),
-  `src/` (code), and `test/` (tests). Use when asked to set up this layout, migrate an existing repo
-  into it, extract intent (the durable what & why) from existing docs and code, or explain the rules,
-  directory/file structure, file sections, AGENTS.md, and per-level READMEs that govern it.
-  General-purpose: contains no project-specific content.
+  `src/` (code), and `test/` (tests). Use when asked to set up this layout, start a brand-new
+  repository with it (scaffolds from the companion getting-started template, including its pinned
+  Markdown check gate), migrate an existing repo into it, extract intent (the durable what & why)
+  from existing docs and code, or explain the rules, directory/file structure, file sections,
+  AGENTS.md, and per-level READMEs that govern it. General-purpose: contains no project-specific
+  content.
 ---
 
 # Intent-governed architecture (the four legs)
@@ -31,7 +33,9 @@ repo) and a **`README.md`** (the orientation door). Each leg has its own `README
 
 This skill is **general-purpose** — it carries no domain content. You supply the domain by mining
 the target repository. Ready-to-copy skeletons live in `references/templates/`; the full layout spec
-and file-section schemas live in `references/structure.md`.
+and file-section schemas live in `references/structure.md`; and a complete, ready-to-run repository
+template (the four legs plus a pinned Markdown check gate) lives in the skill's home repository
+under [`template/`](https://github.com/crumley/intent-architecture/tree/main/template).
 
 ---
 
@@ -160,11 +164,46 @@ are **optional** — add them when they fit; omit them for a pure spec repo.
 
 ---
 
+## When asked to start a NEW repository
+
+When the user wants a **fresh repository** with this structure (there is nothing yet to mine),
+scaffold from the companion **getting-started template** instead of hand-assembling the skeleton.
+The template ships the four legs, per-leg READMEs, `AGENTS.md` (with a `CLAUDE.md` symlink), an
+`intent/` placeholder skeleton, a `design/` tree whose `0001-docs-foundation` entry and ADRs record
+the template's own tooling choices, and a pinned Markdown check gate (mise running dprint + lychee,
+with CI running the same `mise run check`).
+
+1. **Scaffold** into the target directory and initialize git:
+
+   ```sh
+   npx degit crumley/intent-architecture/template <dir> && cd <dir> && git init
+   ```
+
+   (No `npx`? `git clone --depth 1 https://github.com/crumley/intent-architecture` and copy its
+   `template/` directory instead. No network at all? Build the docs skeleton from
+   `references/templates/` and tell the user the check gate can be added later from the template
+   repository.)
+
+2. **Prove the gate green before touching content**: `mise install && mise run check` (Markdown
+   format + links). If mise is not installed, say so and continue — the structure works without it;
+   the gate can be enabled later.
+3. **Work the checklist** at the top of the template's `README.md`: name the system, then delete the
+   getting-started block.
+4. **Fill the intent from the user, not from thin air.** Continue with phases 3–9 below, treating
+   the conversation and anything the user provides as the material to mine — phase 1's survey is the
+   conversation itself, and the do-not-invent rule applies with full force to an empty repo.
+5. **Leave the template's design record in place.** `design/0001-docs-foundation/` and its ADRs
+   document tooling the new repo actually ships; if the project later chooses differently, supersede
+   them (never delete). The project's first real design entry is `0002-`.
+
+---
+
 ## When asked to apply this to a repository
 
 Work through these phases. **Do not invent domain content** — extract it from what exists. If the
-repo is empty, you are bootstrapping; if it has docs and code, you are mining and refactoring. Read
-`references/structure.md` and the relevant `references/templates/` before writing files.
+repo is brand-new, scaffold from the template first (previous section), then join at phase 3; if it
+has docs and code, you are mining and refactoring. Read `references/structure.md` and the relevant
+`references/templates/` before writing files.
 
 ### 1. Survey what exists
 
