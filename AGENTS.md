@@ -12,10 +12,14 @@ model.
 
 - [`.agents/skills/intent-architecture/`](.agents/skills/intent-architecture/SKILL.md) — the
   **skill** (`SKILL.md` + `references/`). This copy is canonical: an edit here is an edit to the
-  skill everyone installs. Keep it general-purpose — no project-specific content.
+  skill everyone installs — the repo is an installable skill package
+  (`npx skills add crumley/intent-architecture` discovers it at this path). Keep it general-purpose
+  — no project-specific content.
 - [`template/`](template/) — the **getting-started template** copied into new repositories. It must
   stay generic (placeholders, no domain content) and must stay green under its own gate:
-  `mise run check` inside `template/`, or `mise run template-check` from here.
+  `mise run check` inside `template/`, or `mise run template-check` from here. The skill's "start a
+  NEW repository" section describes what the template ships — a change to one is a change to both;
+  keep them in sync.
 
 ## Conventions
 

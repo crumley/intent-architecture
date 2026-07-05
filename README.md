@@ -17,8 +17,17 @@ it — guidance lives once, under the harness-neutral name).
 
 ## Install the skill
 
-The skill is a plain directory in the portable `SKILL.md` format; installing it is copying (or
-symlinking) it into wherever your harness loads skills from. It lives under `.agents/` — the
+This repo is an installable skill package. The [skills CLI](https://github.com/vercel-labs/skills)
+installs it into the canonical `~/.agents/skills/` and links it into every harness it detects
+(Claude Code, Codex, Cursor, and others), recording it in your `skills` lockfile for restore on a
+new machine:
+
+```sh
+npx skills add crumley/intent-architecture
+```
+
+Manual alternative — the skill is a plain directory in the portable `SKILL.md` format, so copying or
+symlinking it wherever your harness loads skills from works too. It lives under `.agents/` — the
 harness-neutral home; harness-specific directories point at it, not the other way around:
 
 ```sh
@@ -29,12 +38,16 @@ ln -s "$PWD/intent-architecture/.agents/skills/intent-architecture" <workspace>/
 ln -s "$PWD/intent-architecture/.agents/skills/intent-architecture" ~/.claude/skills/
 ```
 
-Then ask the agent to apply the intent architecture to a repository — the skill mines existing docs
-and code rather than inventing content, so it works on empty and mature repos alike.
+## Use the skill
+
+Ask the agent to **apply the intent architecture to a repository** — the skill mines existing docs
+and code rather than inventing content, so it works on empty and mature repos alike. Or ask it to
+**start a new repository** — the skill scaffolds from [`template/`](template/) below, proves the
+check gate green, and then grows the intent from what you tell it.
 
 ## Start a repo from the template
 
-Copy [`template/`](template/) as the root of a new repository:
+The agentless path — copy [`template/`](template/) as the root of a new repository:
 
 ```sh
 npx degit crumley/intent-architecture/template my-project
