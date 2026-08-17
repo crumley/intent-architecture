@@ -204,7 +204,11 @@ Header line: `Layer: intent · subsystem (seam). The contract; design plans the 
   **not** a mirror of intent.
 - **The common entry format** (the entry sections) and the **`decisions/`** folder of ADRs.
 - **The rules that keep it honest** — Serves-intent; append/supersede, never overwrite;
-  spec-feedback, not silent rewrites of `intent/`.
+  spec-feedback, not silent rewrites of `intent/` (including how adjudication happens: each accepted
+  change its own small intent-edit PR, the human's merge as the adjudication act).
+- **Open spec-feedback** — a small index of the SFs still `pending` across entries, kept in this
+  README so the queue is repo-visible rather than living in someone's head or one agent's session
+  memory; a line leaves the index when the SF's disposition is appended in its entry.
 
 ### `design/NNNN-<slug>/README.md` (template: `templates/design-entry.md`; foundation example: `design-foundation.md`)
 
@@ -218,6 +222,10 @@ Header line: `Layer: design — entry. The how + the record of building it. Stat
 - **Build log** — the append-only journal; no "works" claim without the exact command that proves
   it.
 - **Spec-feedback** — intent frictions (`SF-NNN`: slice, assumption, proposed revision), or "none".
+  An SF is `pending` until settled; its disposition —
+  `adjudicated — <link to the intent change that
+  settled it>` or `declined — <one-line why>` — is
+  appended to it, never rewriting the original text.
 
 ### `design/decisions/NNNN-<slug>.md` (template: `templates/design-decision.md`)
 
@@ -276,6 +284,21 @@ identifier** (`SF-001`, `SF-002`, …) so a human can cite it precisely, the ass
 moving, and a concrete proposed revision — the spec change is left for human review. Because entries
 are numbered and kept, the **diff in `intent/` across entries** is the visible result of the
 experiment. Templates: `design-entry`, `design-decision`.
+
+**The spec-feedback lifecycle.** Raising an SF is half the loop; the disposition closes it. An SF is
+`pending` from the moment it is raised — the implicit default, no line needed. Once settled, a
+**disposition line is appended** to it, never rewriting the original text:
+`adjudicated — <link to the intent PR/commit/entry that settled it>` or `declined — <one-line why>`.
+The design README carries a small index of the SFs still pending across entries. **Why:** without a
+recorded disposition, the open-SF queue lives in someone's head or one agent's session memory —
+exactly the unrecorded state this structure exists to eliminate.
+
+**How adjudication happens.** The friction is discussed with the owner, and each decision becomes
+its **own small intent-edit change** — its own branch and PR, **never bundled into a build PR**.
+Small separate PRs keep each adjudication reviewable and atomic; never bundling keeps a build PR
+from smuggling intent changes past review. The human's **merge is the adjudication act** — the
+decision is auditable in history rather than in chat. The build does not wait: it proceeds on the
+SF's stated assumption, and on merge the SF gets its disposition backlink.
 
 (Earlier versions of this structure used a separate `plan/` leg for scope/log/spec-feedback plus
 ADRs; that **folds into `design/`** — the entry carries the build record, `design/decisions/`

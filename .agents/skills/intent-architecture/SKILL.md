@@ -151,10 +151,17 @@ are **optional** — add them when they fit; omit them for a pure spec repo.
   **the build does not silently rewrite `intent/`** — a friction is recorded in the entry's
   Spec-feedback with a **stable identifier** (`SF-001`, …, so a human can cite it precisely) and a
   concrete proposed revision, and the build proceeds on a stated assumption, leaving the spec change
-  for human review. Because entries are numbered and kept, the _progression_ shows: the diff in
-  `intent/` across entries is the visible payoff. (A pure spec repo's entries are just the _how_; a
-  built repo's also carry Scope/Build-log/Spec-feedback.) Templates: `design-entry`,
-  `design-decision`.
+  for human review. Adjudication has a shape of its own: each accepted change is its **own small
+  intent-edit PR**, never bundled into a build PR (kept separate it stays reviewable and atomic, and
+  a build PR cannot smuggle intent edits past review); the human's **merge is the adjudication act**
+  — auditable in history, not in chat — while the build proceeds meanwhile on the SF's stated
+  assumption. Once settled, the SF gets a **disposition** appended (never rewriting its text):
+  `adjudicated — <link to the intent change>` or `declined — <one-line why>`; until then it is
+  `pending`, and the design README indexes the pending queue so it lives in the repo, not in
+  someone's head or one session's memory. Because entries are numbered and kept, the _progression_
+  shows: the diff in `intent/` across entries is the visible payoff. (A pure spec repo's entries are
+  just the _how_; a built repo's also carry Scope/Build-log/Spec-feedback.) Templates:
+  `design-entry`, `design-decision`.
 - **`CONTRIBUTING.md` — how we build here.** The engineering qualities every contribution honors —
   **opinionated, automated formatting/linting on every artifact** (push checks into tooling so a
   contributor, human or agent, gets fast automated feedback), **a fast write→fail→fix test loop**,

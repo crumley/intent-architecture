@@ -61,4 +61,6 @@ command that proves it — this is the cold-start memory that lets the work resu
 - **Friction** — what building surfaced, concretely.
 - **Assumption** — what this entry does in the meantime, to keep moving.
 - **Proposed revision** — the specific change to the slice.
-- **Status** — open | proposed | resolved-in-build.
+- **Disposition** — appended once the friction is settled, **never rewriting the lines above**:
+  implicitly `pending` until then; `adjudicated — <link to the intent change that settled it>`; or
+  `declined — <one-line why>`.
