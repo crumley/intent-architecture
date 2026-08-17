@@ -28,6 +28,9 @@ what/why, not a build choice.
 | [`01-concepts/`](01-concepts/)     | The **domain**: the nouns and processes, with their why.                                  |
 | [`02-subsystems/`](02-subsystems/) | The **swappable machinery** (the seams): the constraints any design of each must satisfy. |
 
+`01-concepts/` and `02-subsystems/` start empty: one numbered file per concept (`00-<concept>.md`,
+…) and per seam (`00-<subsystem>.md`, …), added as understanding grows.
+
 ## The two governing rules
 
 1. **What/why vs. how.** Keep this tree to the durable what & why; the how lives in `../design/`.

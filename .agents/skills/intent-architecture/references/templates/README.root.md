@@ -10,7 +10,7 @@ The repo stands on four parallel trees. **`intent` governs the other three.**
 | Leg                  | What it is                                                                                                                                                        | Rate of change                                                       |
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
 | [`intent/`](intent/) | The durable **what & why** — purpose, concepts, and constraints.                                                                                                  | Changes **only** when our understanding of the system changes. Rare. |
-| [`design/`](design/) | The **how**, and the **record of building it** — chronological design entries (scope + design + build log + spec-feedback) and stack ADRs in `design/decisions/`. | As the build proceeds and better designs are learned.                |
+| [`design/`](design/) | The **how**, and the **record of building it** — chronological design entries (scope + design + build log + spec-feedback) and stack ADRs in `design/decisions/`. | Appends as the build proceeds; old entries are kept.                 |
 | [`src/`](src/)       | The code that implements the design.                                                                                                                              | Moves with `design`.                                                 |
 | [`test/`](test/)     | The tests that hold the code to the design and the intent.                                                                                                        | Moves with `design`.                                                 |
 
@@ -23,4 +23,14 @@ repo. **Read it first.**
 
 ## How to use it
 
-Read [`AGENTS.md`](AGENTS.md), then the reading order in [`intent/README.md`](intent/README.md).
+- **To understand the system:** read [`AGENTS.md`](AGENTS.md), then follow the reading order in
+  [`intent/README.md`](intent/README.md).
+- **To build the system:** read the intent, then [`design/README.md`](design/README.md) — open a
+  design entry, set its scope, journal the build in its log, and trace every entry back to the
+  intent it serves.
+- **To change the design:** keep the _what/why_ in `intent/` and the _how_ in `design/`; keep one
+  home per idea; preserve every _why_; reconcile the triangle when it diverges.
+
+How we build — the pinned toolchain, the single check gate, and the test ethos — is in
+[`CONTRIBUTING.md`](CONTRIBUTING.md). Short version: `mise run fmt` as you write, `mise run check`
+before you push.

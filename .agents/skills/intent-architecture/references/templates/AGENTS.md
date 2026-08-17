@@ -14,8 +14,8 @@ The repo stands on four parallel trees; **`intent` governs the other three** (se
   [`intent/README.md`](intent/README.md).
 - [`design/`](design/) — the **how**, and the **record of building it**: chronological **design
   entries** (each carrying its scope, the design, an append-only build log, and any intent
-  spec-feedback) plus stack ADRs in `design/decisions/`. Organized for building, not a mirror of
-  intent.
+  spec-feedback) plus stack ADRs in `design/decisions/`. Entries are **superseded, not
+  overwritten**. Organized for building, not a mirror of intent. Start at `design/README.md`.
 - [`src/`](src/) — the code. [`test/`](test/) — the tests.
 
 `design` + `src` + `test` move together; `intent` sits above them.
@@ -40,11 +40,13 @@ The repo stands on four parallel trees; **`intent` governs the other three** (se
   `00-foundation/` → `01-concepts/` → `02-subsystems/`.
 - **Capture a requirement** — write the durable what & why into the relevant `intent/` slice; if it
   defers a decision to the build, note it inline (_Left to implementation_).
-- **Plan or do the build** — open a **design entry** (`design/NNNN-<slug>/`): its scope, the how, an
-  append-only build log, and any intent frictions as spec-feedback — each pointing back to the
-  intent it serves. Stack/tooling choices are ADRs in `design/decisions/`. An accepted spec-feedback
-  rides its **own small intent-edit PR**, never a build PR — the human's merge is the adjudication —
-  while the build proceeds on the SF's stated assumption.
+- **Plan or do the build** — open a **design entry** (`design/NNNN-<slug>/`, from the template in
+  `design/0000-template/`): name the intent it serves, set its scope, record the _how_, journal the
+  build in its log, and record stack choices as ADRs in `design/decisions/`. A later entry
+  supersedes (never overwrites) the one it replaces. The build authors `design/`, `src/`, `test/`;
+  it does **not** silently rewrite `intent/` — friction goes to the entry's spec-feedback for human
+  review. An accepted spec-feedback rides its **own small intent-edit PR**, never a build PR — the
+  human's merge is the adjudication — while the build proceeds on the SF's stated assumption.
 
 ## Conventions
 
@@ -53,3 +55,6 @@ The repo stands on four parallel trees; **`intent` governs the other three** (se
   to read them; unnumbered files (`README.md`, glossary, open-questions) are references read out of
   sequence. Renumber neighbors if you insert a step, and update references.
 - Cross-reference by relative path; keep links live.
+- **How we build here** — opinionated formatting/linting on every artifact, fast test feedback, and
+  high assertion density — is in `CONTRIBUTING.md`. Run `mise run fmt` as you write and
+  `mise run check` before you push.

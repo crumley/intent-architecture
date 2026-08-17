@@ -19,7 +19,11 @@ model.
   stay generic (placeholders, no domain content) and must stay green under its own gate:
   `mise run check` inside `template/`, or `mise run template-check` from here. The skill's "start a
   NEW repository" section describes what the template ships — a change to one is a change to both;
-  keep them in sync.
+  keep them in sync. In sync means **content-identical**: every rule, bullet, and section in one
+  copy exists in the other — including each skill `references/templates/` skeleton and its
+  `template/` counterpart — and only **register** may differ (skeletons keep angle-bracket
+  placeholders, plain paths, and the gate named as a worked example; the template resolves
+  placeholders, links live paths, and wires mise/dprint/lychee concretely).
 
 ## Conventions
 
