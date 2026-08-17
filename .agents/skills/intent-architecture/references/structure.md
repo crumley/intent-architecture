@@ -226,7 +226,9 @@ Header line: `Layer: intent · subsystem (seam). The contract; design plans the 
 
 ### `design/NNNN-<slug>/README.md` (template: `templates/design-entry.md`; foundation example: `design-foundation.md`)
 
-Header line: `Layer: design — entry. The how + the record of building it. Status: …`
+Opening banner: a one-line statement of what the entry builds and why, then
+`**Status:** proposed | in-progress | accepted | superseded by NNNN-<slug>/ · **Started:**
+YYYY-MM-DD`.
 
 - **Serves intent** — pointer(s) to the intent slice(s) this entry realizes (may be several; design
   groups by build, so one entry can span multiple concepts/seams). **Required.**

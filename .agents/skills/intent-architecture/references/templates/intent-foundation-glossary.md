@@ -8,7 +8,7 @@ to the **slice that defines it authoritatively** (the _one home_ per the rules i
 [`../README.md`](../README.md)). The glossary never becomes a second definition — it indexes, it
 does not own.
 
-| Term   | One-line meaning | Defining slice                         |
-| ------ | ---------------- | -------------------------------------- |
-| <Term> | <one line>       | [`01-concepts/00-<concept>.md`](…)     |
-| <Term> | <one line>       | [`02-subsystems/00-<subsystem>.md`](…) |
+| Term   | One-line meaning | Defining slice                  |
+| ------ | ---------------- | ------------------------------- |
+| <Term> | <one line>       | <`01-concepts/00-<concept>.md`> |
+| <Term> | <one line>       | <`02-subsystems/00-<seam>.md`>  |

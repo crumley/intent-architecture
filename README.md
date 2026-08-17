@@ -56,7 +56,7 @@ mise install && mise run check   # the gate is green before you write a line
 ```
 
 Then follow the checklist at the top of the template's [`README.md`](template/README.md): name the
-system, write the vision, and let the intent grow from there. The
+system, choose a license, write the vision, and let the intent grow from there. The
 [ward repository](https://github.com/crumley/ward) is a worked example of the same structure with
 its intent filled in.
 

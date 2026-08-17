@@ -14,3 +14,6 @@ Two kinds of test are expected, and the distinction matters because of the four-
   was really a design test.
 
 `test` moves with `design` and `src`; all three reconcile back to `intent` when they diverge.
+
+**How we write tests** — high assertion density, cases first and setup at the bottom, table-driven
+where it fits, and a fast write→fail→fix loop — is in [`../CONTRIBUTING.md`](../CONTRIBUTING.md).

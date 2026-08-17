@@ -1,66 +1,47 @@
-# <Entry name>
+# 0000 — <entry title>
 
-> **Layer:** design — entry. The _how_ + the record of building it. **Status:** <proposed |
-> in-progress | accepted | superseded by NNNN>
+> <One line: what this entry builds and why it exists.>
+>
+> **Status:** proposed | in-progress | accepted | superseded by `NNNN-<slug>/` · **Started:**
+> YYYY-MM-DD
 
-<One line: what unit of build work this entry is. An entry is grouped however the build naturally
-clusters — a foundation, a milestone, a component, a feature area, a phase. Copy this directory to
-`design/NNNN-<slug>/` and fill the sections below; keep them all, even if a section is "none".>
+Copy this directory to `NNNN-<slug>/` (next number in sequence) for each unit of build work. Every
+section stays — write "none this entry" rather than deleting one. The format and the rules it serves
+are in [`../README.md`](../README.md).
 
 ## Serves intent
 
-<Pointer(s) to the intent slice(s) this entry realizes — **required**. An entry may serve several
-(design groups by build, so one entry can span multiple concepts/seams). If you cannot name the
-intent this serves, it is not ready to build.>
-
-- [`../../intent/02-subsystems/NN-<name>.md`](../../intent/02-subsystems/NN-<name>.md) — <the
-  contract / constraints this entry satisfies>.
+**Required.** The intent slice(s) this entry realizes, each linked by relative path, with a phrase
+on how. An entry that cannot name the intent it serves is not ready to build.
 
 ## Scope
 
-<The boundary this entry works to.>
+The contract this entry works to, and its exit test. Fill this **first**.
 
-- **In** — what this entry builds.
-- **Deferred** — what it intentionally leaves out, and **why** (each deferral keeps a real invariant
-  and drops only work that is safe to defer behind a seam).
-- **Acceptance** — the exit test: the concrete check that says this entry is done.
+- **In:** what this entry builds, stated tightly.
+- **Deferred:** what it deliberately does not build, and _why deferring is safe_.
+- **Acceptance:** the check that says this entry is done — a command, a scenario, a test.
 
 ## Design
 
-<The concrete _how_: the decisions (link the ADRs in [`../decisions/`](../decisions/)), the module
-layout `src/` mirrors, the key mechanisms. Name things specifically — that is this tree's job. Where
-this entry settles a decision the intent left open, record the choice and its _why_ and link back to
-the slice that deferred it.>
+The _how_: the decisions and the shape they produce.
 
-- **<Choice>** — <what it is, and how it satisfies the intent it serves> (ADR:
-  [`../decisions/NNNN-<slug>.md`](../decisions/NNNN-<slug>.md)).
+- **Decisions:** link each ADR in [`../decisions/`](../decisions/) this entry rests on; record here
+  any entry-local choices too small for an ADR, each with its _why_.
+- **Layout:** the modules/files this entry adds or changes, and why they are shaped that way.
+- **Mechanisms:** the key moving parts, at the level a next builder needs to pick the work up.
 
 ## Build log
 
-<Append-only. One entry per iteration, newest at the bottom. No "works" claim without the exact
-command that proves it — this is the cold-start memory that lets the work resume.>
-
-### <n> — <goal>
-
-- **Did** — what was done.
-- **Works now** — what is provably working, **with the exact command** (and its output) that proves
-  it.
-- **Decisions** — anything settled (link a new ADR if it is a stack/tooling choice).
-- **Next** — the next step.
+Append-only journal; newest entry at the bottom. One entry per iteration: **goal**, **what was
+done**, **what works now — with the exact command that proves it**, **decisions**, **next**. No
+"works" claim without a command.
 
 ## Spec-feedback
 
-<Intent frictions found while building — recorded here, **not** silently applied to `intent/`. Or
-"none this entry.">
-
-### SF-NNN — <short title>
-
-- **Slice / section** — the intent file + heading (e.g. `intent/01-concepts/00-<name>.md` → "…").
-- **Kind** — ambiguity | gap | contradiction | over-specification | hard-to-implement |
-  doesn't-serve-purpose.
-- **Friction** — what building surfaced, concretely.
-- **Assumption** — what this entry does in the meantime, to keep moving.
-- **Proposed revision** — the specific change to the slice.
-- **Disposition** — appended once the friction is settled, **never rewriting the lines above**:
-  implicitly `pending` until then; `adjudicated — <link to the intent change that settled it>`; or
-  `declined — <one-line why>`.
+Intent frictions found while building — or **"none this entry."** Each entry: a stable id (`SF-NNN`,
+unique within this entry), the intent slice + section, the friction, the **assumption** made to keep
+moving, and a concrete **proposed revision** for human review. `intent/` is never silently
+rewritten. An SF is `pending` until settled (no line needed); once settled, **append** a disposition
+line — `adjudicated — <link to the intent change that settled it>` or `declined — <one-line why>` —
+never rewriting the original text.

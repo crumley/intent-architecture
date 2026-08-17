@@ -211,8 +211,9 @@ with CI running the same `mise run check`).
 2. **Prove the gate green before touching content**: `mise install && mise run check` (Markdown
    format + links). If mise is not installed, say so and continue — the structure works without it;
    the gate can be enabled later.
-3. **Work the checklist** at the top of the template's `README.md`: name the system, then delete the
-   getting-started block.
+3. **Work the checklist** at the top of the template's `README.md`: name the system, choose and
+   commit a license (the template deliberately ships none — until one lands, the new repo is
+   all-rights-reserved by default), then delete the getting-started block.
 4. **Fill the intent from the user, not from thin air.** Continue with phases 3–9 below, treating
    the conversation and anything the user provides as the material to mine — phase 1's survey is the
    conversation itself, and the do-not-invent rule applies with full force to an empty repo.
