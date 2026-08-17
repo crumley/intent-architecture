@@ -137,9 +137,9 @@ payoff.
 
 ---
 
-## Optional: the build record and contribution guidelines
+## Optional: the build record, the delivery shape, and contribution guidelines
 
-Two things earn their keep in repos that are **where a system is built**, not only specified. Both
+Three things earn their keep in repos that are **where a system is built**, not only specified. All
 are **optional** — add them when they fit; omit them for a pure spec repo.
 
 - **The build record lives in `design/` itself** (there is **no separate `plan/` leg** — it folds
@@ -162,12 +162,28 @@ are **optional** — add them when they fit; omit them for a pure spec repo.
   shows: the diff in `intent/` across entries is the visible payoff. (A pure spec repo's entries are
   just the _how_; a built repo's also carry Scope/Build-log/Spec-feedback.) Templates:
   `design-entry`, `design-decision`.
+- **The delivery shape for agent-built entries.** When entries are built by agents and gated by a
+  human: **entry ↔ branch ↔ PR, one to one**, the PR body distilling the entry (scope, evidence, SFs
+  raised) with links back to it; the **owner's commissioning directive quoted verbatim** at the top
+  of the entry — the exact words are what later adjudication rules against, and a paraphrase loses
+  the ground truth; the orchestrating agent **verifies the build independently** (its own gate run,
+  its own smoke test, a read of the entry) before the PR opens; gated acts (merge, close) stay with
+  the human. Concurrent entries add a protocol, because two PRs each green alone can make the main
+  line red when both merge — **file-disjoint is not meaning-disjoint**: each entry's build log names
+  its shared surfaces; the second of any concurrently built pair merges only after a rebase and a
+  combined gate; the main line's gate is verified after any merge of concurrent work; and entry
+  numbers are **reserved at commission time** so parallel builds don't collide on "next in
+  sequence". Finally, **delivered means reachable**: a forge reporting "merged" is not proof the
+  work reached the main line (a stacked PR can merge into a stale base and strand the work) — before
+  an entry's Status moves to accepted, verify the merge commit is an ancestor of the main line
+  (`git merge-base --is-ancestor <merge-commit> <main>`), and retarget stacked PRs to the main line
+  before merging. Full detail: `references/structure.md`.
 - **`CONTRIBUTING.md` — how we build here.** The engineering qualities every contribution honors —
   **opinionated, automated formatting/linting on every artifact** (push checks into tooling so a
   contributor, human or agent, gets fast automated feedback), **a fast write→fail→fix test loop**,
-  and **high-assertion-density, table-driven tests** (cases first, setup at the bottom). Distinct
-  from `AGENTS.md` (the four-leg discipline) and `intent/` (what the system is). Template:
-  `CONTRIBUTING`.
+  and **high-assertion-density, table-driven tests** (cases first, setup at the bottom, pinned
+  counts kept as deliberate composition tripwires). Distinct from `AGENTS.md` (the four-leg
+  discipline) and `intent/` (what the system is). Template: `CONTRIBUTING`.
 
 ---
 
@@ -316,7 +332,7 @@ The four-leg skeleton and the rules are invariant. The _contents_ are not: the n
 files, whether a repo needs `01-concepts/` vs. only `02-subsystems/`, and how `design/` is organized
 all depend on the target. A tiny library may need only `intent/00-foundation/` and a single design
 entry; a large system may need many concepts, seams, and entries. The build-record depth of
-`design/` (the Scope / Build-log / Spec-feedback in entries, and ADRs in `decisions/`) and
-`CONTRIBUTING.md` are likewise scaled to fit — add them only when the repo is _built_, not merely
-specified. Scale the structure to the repo, but never collapse the **what/why ↔ how boundary** or
-the **one-home** rule — those are what make it work.
+`design/` (the Scope / Build-log / Spec-feedback in entries, and ADRs in `decisions/`), the delivery
+shape, and `CONTRIBUTING.md` are likewise scaled to fit — add them only when the repo is _built_,
+not merely specified. Scale the structure to the repo, but never collapse the **what/why ↔ how
+boundary** or the **one-home** rule — those are what make it work.

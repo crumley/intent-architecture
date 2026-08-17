@@ -36,5 +36,10 @@ wired:
   helpers), so a reader grasps the _what_ before the _how_.
 - **Prefer table-driven tests.** A table of `(input → expected)` rows is information-dense and cheap
   to extend — a new case is a new row.
+- **A pinned count is a tripwire, on purpose.** A test that pins a count or an enumeration
+  ("creation has N steps", "exactly these verbs exist") is a deliberate **composition tripwire**:
+  two concurrently built changes that each pass alone but both move the same meaning collide
+  **loudly** at the combined gate instead of merging silently. Updating a pinned count is a
+  deliberate act — re-read what the number means — never a chore.
 
 **Why:** you read a test to learn what it guarantees; dense-first, boilerplate-last makes that fast.

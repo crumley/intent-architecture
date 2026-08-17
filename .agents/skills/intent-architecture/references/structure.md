@@ -260,7 +260,7 @@ one-home rule applied to contracts.
 
 ---
 
-## 6. Optional depth: the build record in `design/`, and `CONTRIBUTING.md`
+## 6. Optional depth: the build record, the delivery shape, and `CONTRIBUTING.md`
 
 These are **optional** additions for repos that are _where a system is built_, not only specified.
 Add them when they fit; omit them for a pure spec repo.
@@ -304,6 +304,34 @@ SF's stated assumption, and on merge the SF gets its disposition backlink.
 ADRs; that **folds into `design/`** — the entry carries the build record, `design/decisions/`
 carries the ADRs. Distinguish the one-time **ADR** from the evolving **entry**.)
 
+### The delivery shape for agent-built entries
+
+When design entries are built by agents and gated by a human, give the delivery a fixed shape —
+optional like the rest of this section, scaled to fit:
+
+- **Entry ↔ branch ↔ PR, one to one.** Each entry is built on its own branch and delivered by its
+  own PR; the PR body distills the entry — scope, evidence, spec-feedback raised — and links back to
+  it. One unit of review per unit of work.
+- **The commissioning directive, verbatim.** The owner's directive that commissioned the work is
+  quoted word for word at the top of the entry (and the PR). Preserving the exact words is what
+  makes later adjudication possible — a paraphrase loses the ground truth being ruled against.
+- **Independent verification before the PR opens.** The orchestrating agent verifies the build
+  itself — its own run of the gate, its own smoke test, a read of the entry — rather than relaying
+  the builder's report. Gated acts (merge, close) stay with the human.
+- **The concurrency protocol.** Two PRs each green alone can make the main line red when both merge
+  — **file-disjoint is not meaning-disjoint**. So: when entries are built concurrently, each entry's
+  build log **names its shared surfaces**; the second of any concurrently built pair merges only
+  after a rebase and a combined gate run; and after any merge of concurrent work, verify the main
+  line's gate.
+- **Numbers reserved at commission.** Entry numbers are assigned when the work is commissioned, not
+  when it lands, so parallel builds don't collide on "next number in sequence".
+- **Delivered means reachable.** A forge reporting a PR "merged" is not proof the work reached the
+  main line: a stacked PR merged into a stale base after the base's own PR has merged strands the
+  work while the forge honestly says "merged". Before an entry's Status moves to accepted or
+  delivered, verify the merge commit is reachable from the main line
+  (`git merge-base --is-ancestor <merge-commit> <main>`), and retarget stacked PRs to the main line
+  before merging.
+
 ### `CONTRIBUTING.md` — how we build here
 
 The engineering qualities every contribution honors, enforced by tooling wherever possible:
@@ -317,6 +345,9 @@ The engineering qualities every contribution honors, enforced by tooling whereve
 - **High-assertion-density, table-driven tests** — lead with the cases (the _what_), push fixtures
   and boilerplate to the bottom (the _how_); a table of `(input → expected)` rows is dense and cheap
   to extend.
+- **Pinned counts as composition tripwires** — a test that pins a count or an enumeration forces
+  concurrent changes to the same meaning to collide loudly at the combined gate instead of merging
+  silently; updating the pin is a deliberate act, not a chore.
 
 Distinct from `AGENTS.md` (the four-leg discipline) and `intent/` (what the system is). Template:
 `CONTRIBUTING`.
