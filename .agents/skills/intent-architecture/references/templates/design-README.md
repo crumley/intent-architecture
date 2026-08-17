@@ -37,7 +37,9 @@ Every entry's `README.md` (see the [template](0000-template/README.md)) carries 
   cold-start memory that lets work resume across sessions.
 - **Spec-feedback** — intent frictions found while building, each with a stable id (`SF-NNN`), the
   slice it touches, the assumption made to keep moving, and a proposed revision — or "none this
-  entry."
+  entry." An SF is `pending` until settled; once settled, its disposition is **appended** to it —
+  `adjudicated` with a link to the intent change that settled it, or `declined` with a one-line why
+  — never rewriting the original text, so what building surfaced stays on the record.
 
 ## The rules that keep it honest
 
@@ -46,15 +48,37 @@ Every entry's `README.md` (see the [template](0000-template/README.md)) carries 
    settles a decision the intent left open, it records the choice and its _why_ here.
 2. **Append and supersede, never overwrite.** When a later entry re-does an earlier one's work, it
    says so explicitly and links back; the earlier entry's Status points forward. Both stay — the
-   _why we changed_ is never lost. The same goes for ADRs.
+   _why we changed_ is never lost. The same goes for ADRs. A cancelled or abandoned entry keeps its
+   number and its record: a gap in the sequence is honest history; renumbering would falsify the
+   lineage.
 3. **Spec-feedback, not silent rewrites.** `intent/` governs; building does **not** rewrite it to
    match the code. When building reveals an intent problem, the entry records it in its
    Spec-feedback section and proceeds on a stated assumption — the spec change is left for human
-   review. (One exception: appending to a slice's own _Open questions_, or noting the build
-   _resolved_ one, is allowed and logged.)
+   review. Each accepted change is its **own small intent-edit change** (its own branch and PR,
+   never bundled into a build PR): kept separate, the adjudication stays reviewable and atomic, and
+   a build PR cannot smuggle intent changes past review. The human's **merge is the adjudication
+   act** — auditable in history, not in chat; on merge, the SF gets its disposition appended. (One
+   exception: appending to a slice's own _Open questions_, or noting the build _resolved_ one, is
+   allowed and logged.)
+4. **Plural techniques converge through use.** When an entry realizes a mechanism the intent
+   deliberately left open, it may build **more than one technique behind the same contract** — a
+   universal baseline plus context-specific alternates. The entry names the candidates and the
+   baseline, states how they will be compared in real use, and records the convergence — one
+   technique kept, or an explicit technique→situation rule — with its _why_, in this entry or the
+   one that supersedes it. An abandoned technique is superseded, not erased. Choosing a technique on
+   paper is weak evidence; running candidates against reality is the cheapest honest comparison —
+   and a contract that has held two live techniques at once is a seam proven to be a seam.
 
 **Why a ledger, not a mirror:** intent is organized for _understanding_ and always states the
 current tip; design is organized for _building over time_. Keeping every entry — its scope, journal,
 and frictions intact, in the order it happened — means the next build starts from what the last one
 learned, and the diff in `intent/` between entries is the visible result: the intent, hardened by
 the act of building the system.
+
+## Open spec-feedback
+
+The SFs still `pending` across entries — the queue lives here, in the repo, not in someone's head or
+one session's memory. When an entry raises an SF, add a line (id, entry, one-line friction); when
+the SF's disposition is appended in its entry, remove the line here.
+
+None pending.

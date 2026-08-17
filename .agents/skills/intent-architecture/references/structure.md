@@ -28,7 +28,7 @@ repo/
 │   │   ├── 00-<subsystem>.md
 │   │   ├── 01-<subsystem>.md
 │   │   └── …
-│   └── 03-walkthrough.md              # OPTIONAL: one scenario threaded through the concepts
+│   └── 03-walkthrough.md              # RECOMMENDED, not required: one scenario threaded through the concepts
 │
 ├── design/                            # the how + the record of building it — organized for BUILDING
 │   ├── README.md
@@ -96,8 +96,19 @@ ADR from the evolving entry.)
 **A record, not a mirror — and chronological.** File entries in the order the work happens, and
 **supersede by appending, not overwriting**. When work is re-done later, the new entry says what it
 replaces and links back; the old entry stays (its Status points forward), so _why it changed_
-survives. Intent is the fresh tip; design is the lineage that got there — and the diff in `intent/`
-across entries is the visible payoff of a build feeding back into the spec.
+survives. A cancelled or abandoned entry likewise keeps its number and its record — a gap in the
+sequence is honest history, and renumbering would falsify the lineage. Intent is the fresh tip;
+design is the lineage that got there — and the diff in `intent/` across entries is the visible
+payoff of a build feeding back into the spec.
+
+**Plural techniques converge through use.** When an entry realizes a mechanism the intent
+deliberately left open, it may build **more than one technique behind the same contract** — a
+universal baseline plus context-specific alternates. The entry names the candidates and the
+baseline, states how they will be compared in real use, and records the convergence — one technique
+kept, or an explicit technique→situation rule — with its _why_, in that entry or the one that
+supersedes it; an abandoned technique is superseded, not erased. **Why:** choosing a technique on
+paper is weak evidence — running candidates against reality is the cheapest honest comparison — and
+a contract that has held two live techniques at once is a seam proven to be a seam.
 
 A **foundation entry** is **recommended as the typical first step** — the global architecture and
 dev flow (language/runtime, repo/module layout, the toolchain and its check gate) that later entries
@@ -144,7 +155,8 @@ Stable headings matter — they serve the agent audience and make the corpus nav
   it is a guide, not vocabulary policing.
 - **The three groupings** table.
 - **The two governing rules** (what/why vs. how; one home per idea).
-- **Reading order** (and the optional walkthrough, if present).
+- **Reading order** (and the recommended walkthrough, if present — a concrete scenario is intent
+  text a builder can rule against, and a gap shows up as a step the walkthrough cannot narrate).
 
 ### `intent/00-foundation/00-vision.md`
 
@@ -203,8 +215,14 @@ Header line: `Layer: intent · subsystem (seam). The contract; design plans the 
 - What design is: **the how + the chronological record of building it**; organized for building,
   **not** a mirror of intent.
 - **The common entry format** (the entry sections) and the **`decisions/`** folder of ADRs.
-- **The rules that keep it honest** — Serves-intent; append/supersede, never overwrite;
-  spec-feedback, not silent rewrites of `intent/`.
+- **The rules that keep it honest** — Serves-intent; append/supersede, never overwrite (a cancelled
+  entry keeps its number and record — a gap in the sequence is honest history); spec-feedback, not
+  silent rewrites of `intent/` (including how adjudication happens: each accepted change its own
+  small intent-edit PR, the human's merge as the adjudication act); plural techniques converge
+  through use.
+- **Open spec-feedback** — a small index of the SFs still `pending` across entries, kept in this
+  README so the queue is repo-visible rather than living in someone's head or one agent's session
+  memory; a line leaves the index when the SF's disposition is appended in its entry.
 
 ### `design/NNNN-<slug>/README.md` (template: `templates/design-entry.md`; foundation example: `design-foundation.md`)
 
@@ -218,6 +236,9 @@ Header line: `Layer: design — entry. The how + the record of building it. Stat
 - **Build log** — the append-only journal; no "works" claim without the exact command that proves
   it.
 - **Spec-feedback** — intent frictions (`SF-NNN`: slice, assumption, proposed revision), or "none".
+  An SF is `pending` until settled; once settled, its disposition is appended to it — `adjudicated`
+  with a link to the intent change that settled it, or `declined` with a one-line why — never
+  rewriting the original text.
 
 ### `design/decisions/NNNN-<slug>.md` (template: `templates/design-decision.md`)
 
@@ -252,7 +273,7 @@ one-home rule applied to contracts.
 
 ---
 
-## 6. Optional depth: the build record in `design/`, and `CONTRIBUTING.md`
+## 6. Optional depth: the build record, the delivery shape, and `CONTRIBUTING.md`
 
 These are **optional** additions for repos that are _where a system is built_, not only specified.
 Add them when they fit; omit them for a pure spec repo.
@@ -277,9 +298,52 @@ moving, and a concrete proposed revision — the spec change is left for human r
 are numbered and kept, the **diff in `intent/` across entries** is the visible result of the
 experiment. Templates: `design-entry`, `design-decision`.
 
+**The spec-feedback lifecycle.** Raising an SF is half the loop; the disposition closes it. An SF is
+`pending` from the moment it is raised — the implicit default, no line needed. Once settled, a
+**disposition line is appended** to it, never rewriting the original text:
+`adjudicated — <link to the intent PR/commit/entry that settled it>` or `declined — <one-line why>`.
+The design README carries a small index of the SFs still pending across entries. **Why:** without a
+recorded disposition, the open-SF queue lives in someone's head or one agent's session memory —
+exactly the unrecorded state this structure exists to eliminate.
+
+**How adjudication happens.** The friction is discussed with the owner, and each decision becomes
+its **own small intent-edit change** — its own branch and PR, **never bundled into a build PR**.
+Small separate PRs keep each adjudication reviewable and atomic; never bundling keeps a build PR
+from smuggling intent changes past review. The human's **merge is the adjudication act** — the
+decision is auditable in history rather than in chat. The build does not wait: it proceeds on the
+SF's stated assumption, and on merge the SF gets its disposition backlink.
+
 (Earlier versions of this structure used a separate `plan/` leg for scope/log/spec-feedback plus
 ADRs; that **folds into `design/`** — the entry carries the build record, `design/decisions/`
 carries the ADRs. Distinguish the one-time **ADR** from the evolving **entry**.)
+
+### The delivery shape for agent-built entries
+
+When design entries are built by agents and gated by a human, give the delivery a fixed shape —
+optional like the rest of this section, scaled to fit:
+
+- **Entry ↔ branch ↔ PR, one to one.** Each entry is built on its own branch and delivered by its
+  own PR; the PR body distills the entry — scope, evidence, spec-feedback raised — and links back to
+  it. One unit of review per unit of work.
+- **The commissioning directive, verbatim.** The owner's directive that commissioned the work is
+  quoted word for word at the top of the entry (and the PR). Preserving the exact words is what
+  makes later adjudication possible — a paraphrase loses the ground truth being ruled against.
+- **Independent verification before the PR opens.** The orchestrating agent verifies the build
+  itself — its own run of the gate, its own smoke test, a read of the entry — rather than relaying
+  the builder's report. Gated acts (merge, close) stay with the human.
+- **The concurrency protocol.** Two PRs each green alone can make the main line red when both merge
+  — **file-disjoint is not meaning-disjoint**. So: when entries are built concurrently, each entry's
+  build log **names its shared surfaces**; the second of any concurrently built pair merges only
+  after a rebase and a combined gate run; and after any merge of concurrent work, verify the main
+  line's gate.
+- **Numbers reserved at commission.** Entry numbers are assigned when the work is commissioned, not
+  when it lands, so parallel builds don't collide on "next number in sequence".
+- **Delivered means reachable.** A forge reporting a PR "merged" is not proof the work reached the
+  main line: a stacked PR merged into a stale base after the base's own PR has merged strands the
+  work while the forge honestly says "merged". Before an entry's Status moves to accepted or
+  delivered, verify the merge commit is reachable from the main line
+  (`git merge-base --is-ancestor <merge-commit> <main>`), and retarget stacked PRs to the main line
+  before merging.
 
 ### `CONTRIBUTING.md` — how we build here
 
@@ -294,6 +358,9 @@ The engineering qualities every contribution honors, enforced by tooling whereve
 - **High-assertion-density, table-driven tests** — lead with the cases (the _what_), push fixtures
   and boilerplate to the bottom (the _how_); a table of `(input → expected)` rows is dense and cheap
   to extend.
+- **Pinned counts as composition tripwires** — a test that pins a count or an enumeration forces
+  concurrent changes to the same meaning to collide loudly at the combined gate instead of merging
+  silently; updating the pin is a deliberate act, not a chore.
 
 Distinct from `AGENTS.md` (the four-leg discipline) and `intent/` (what the system is). Template:
 `CONTRIBUTING`.

@@ -42,4 +42,6 @@ done**, **what works now — with the exact command that proves it**, **decision
 Intent frictions found while building — or **"none this entry."** Each entry: a stable id (`SF-NNN`,
 unique within this entry), the intent slice + section, the friction, the **assumption** made to keep
 moving, and a concrete **proposed revision** for human review. `intent/` is never silently
-rewritten.
+rewritten. An SF is `pending` until settled (no line needed); once settled, **append** a disposition
+line — `adjudicated — <link to the intent change that settled it>` or `declined — <one-line why>` —
+never rewriting the original text.

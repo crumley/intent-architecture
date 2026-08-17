@@ -47,7 +47,9 @@ The repo stands on four parallel trees; **`intent` governs the other three** (se
   _how_, journal the build in its log, and record stack choices as ADRs in
   [`design/decisions/`](design/decisions/). A later entry supersedes (never overwrites) the one it
   replaces. The build authors `design/`, `src/`, `test/`; it does **not** silently rewrite `intent/`
-  — friction goes to the entry's spec-feedback for human review.
+  — friction goes to the entry's spec-feedback for human review. An accepted spec-feedback rides its
+  **own small intent-edit PR**, never a build PR — the human's merge is the adjudication — while the
+  build proceeds on the SF's stated assumption.
 
 ## Conventions
 

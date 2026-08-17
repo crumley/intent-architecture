@@ -52,6 +52,7 @@ them last.
 5. [`00-foundation/open-questions.md`](00-foundation/open-questions.md) — cross-cutting unresolved
    tensions. [`00-foundation/glossary.md`](00-foundation/glossary.md) maps every term to its home.
 
-_(Optional: a walkthrough — one concrete scenario threaded through the concepts — can strengthen and
-stress-test the intent and aid communication. Add `03-walkthrough.md` if it earns its keep; it is
-not a required part of the structure.)_
+**Recommended (not required): a walkthrough** — one concrete scenario threaded through the concepts,
+as `03-walkthrough.md`. A scenario is intent text a builder can **rule against**, not just read —
+when a design question arises mid-build, walkthrough sections serve as adjudication authority — and
+it stress-tests the concepts: a gap shows up as a step the walkthrough cannot narrate.

@@ -42,7 +42,9 @@ The repo stands on four parallel trees; **`intent` governs the other three** (se
   defers a decision to the build, note it inline (_Left to implementation_).
 - **Plan or do the build** — open a **design entry** (`design/NNNN-<slug>/`): its scope, the how, an
   append-only build log, and any intent frictions as spec-feedback — each pointing back to the
-  intent it serves. Stack/tooling choices are ADRs in `design/decisions/`.
+  intent it serves. Stack/tooling choices are ADRs in `design/decisions/`. An accepted spec-feedback
+  rides its **own small intent-edit PR**, never a build PR — the human's merge is the adjudication —
+  while the build proceeds on the SF's stated assumption.
 
 ## Conventions
 
