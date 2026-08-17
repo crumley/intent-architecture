@@ -8,8 +8,9 @@ description: >-
   repository with it (scaffolds from the companion getting-started template, including its pinned
   Markdown check gate), migrate an existing repo into it, extract intent (the durable what & why)
   from existing docs and code, or explain the rules, directory/file structure, file sections,
-  AGENTS.md, and per-level READMEs that govern it. General-purpose: contains no project-specific
-  content.
+  AGENTS.md, and per-level READMEs that govern it — including the optional build-record disciplines:
+  the spec-feedback adjudication lifecycle and the delivery shape for agent-built entries.
+  General-purpose: contains no project-specific content.
 ---
 
 # Intent-governed architecture (the four legs)
@@ -270,14 +271,18 @@ it.
   Number them from the most foundational outward.
 - Where a concept or subsystem deliberately **leaves a decision or constraint to implementation**,
   say so _inline_ in that slice (a short "Left to implementation" note) — that is the right home for
-  deferred decisions, not a separate top-level register.
+  deferred decisions, not a separate top-level register. Deferral is deliberate room: the build may
+  realize an open mechanism with **more than one technique behind the same contract** and let real
+  use pick the winner (the design rule _plural techniques converge through use_).
 
 Write each slice from `references/templates/intent-concept.md` and
 `references/templates/intent-subsystem.md`.
 
-_(Optional, recommended for communication: a walkthrough — one concrete scenario threaded through
-the concepts — strengthens and stress-tests the intent. Add it at the intent layer if it earns its
-keep, e.g. `intent/03-walkthrough.md`. It is not a required part of the structure.)_
+**Recommended: a walkthrough** (e.g. `intent/03-walkthrough.md`) — one concrete scenario threaded
+through the concepts. Not required structure, but it earns its keep twice over: a scenario is intent
+text a builder can **rule against**, not just read — in practice, when a design question arises
+mid-build, walkthrough sections get cited as adjudication authority — and it stress-tests the
+concepts, because a gap shows up as a step the walkthrough cannot narrate.
 
 ### 5. Plan the build in `design/`
 

@@ -28,7 +28,7 @@ repo/
 │   │   ├── 00-<subsystem>.md
 │   │   ├── 01-<subsystem>.md
 │   │   └── …
-│   └── 03-walkthrough.md              # OPTIONAL: one scenario threaded through the concepts
+│   └── 03-walkthrough.md              # RECOMMENDED, not required: one scenario threaded through the concepts
 │
 ├── design/                            # the how + the record of building it — organized for BUILDING
 │   ├── README.md
@@ -96,8 +96,19 @@ ADR from the evolving entry.)
 **A record, not a mirror — and chronological.** File entries in the order the work happens, and
 **supersede by appending, not overwriting**. When work is re-done later, the new entry says what it
 replaces and links back; the old entry stays (its Status points forward), so _why it changed_
-survives. Intent is the fresh tip; design is the lineage that got there — and the diff in `intent/`
-across entries is the visible payoff of a build feeding back into the spec.
+survives. A cancelled or abandoned entry likewise keeps its number and its record — a gap in the
+sequence is honest history, and renumbering would falsify the lineage. Intent is the fresh tip;
+design is the lineage that got there — and the diff in `intent/` across entries is the visible
+payoff of a build feeding back into the spec.
+
+**Plural techniques converge through use.** When an entry realizes a mechanism the intent
+deliberately left open, it may build **more than one technique behind the same contract** — a
+universal baseline plus context-specific alternates. The entry names the candidates and the
+baseline, states how they will be compared in real use, and records the convergence — one technique
+kept, or an explicit technique→situation rule — with its _why_, in that entry or the one that
+supersedes it; an abandoned technique is superseded, not erased. **Why:** choosing a technique on
+paper is weak evidence — running candidates against reality is the cheapest honest comparison — and
+a contract that has held two live techniques at once is a seam proven to be a seam.
 
 A **foundation entry** is **recommended as the typical first step** — the global architecture and
 dev flow (language/runtime, repo/module layout, the toolchain and its check gate) that later entries
@@ -144,7 +155,8 @@ Stable headings matter — they serve the agent audience and make the corpus nav
   it is a guide, not vocabulary policing.
 - **The three groupings** table.
 - **The two governing rules** (what/why vs. how; one home per idea).
-- **Reading order** (and the optional walkthrough, if present).
+- **Reading order** (and the recommended walkthrough, if present — a concrete scenario is intent
+  text a builder can rule against, and a gap shows up as a step the walkthrough cannot narrate).
 
 ### `intent/00-foundation/00-vision.md`
 
@@ -203,9 +215,11 @@ Header line: `Layer: intent · subsystem (seam). The contract; design plans the 
 - What design is: **the how + the chronological record of building it**; organized for building,
   **not** a mirror of intent.
 - **The common entry format** (the entry sections) and the **`decisions/`** folder of ADRs.
-- **The rules that keep it honest** — Serves-intent; append/supersede, never overwrite;
-  spec-feedback, not silent rewrites of `intent/` (including how adjudication happens: each accepted
-  change its own small intent-edit PR, the human's merge as the adjudication act).
+- **The rules that keep it honest** — Serves-intent; append/supersede, never overwrite (a cancelled
+  entry keeps its number and record — a gap in the sequence is honest history); spec-feedback, not
+  silent rewrites of `intent/` (including how adjudication happens: each accepted change its own
+  small intent-edit PR, the human's merge as the adjudication act); plural techniques converge
+  through use.
 - **Open spec-feedback** — a small index of the SFs still `pending` across entries, kept in this
   README so the queue is repo-visible rather than living in someone's head or one agent's session
   memory; a line leaves the index when the SF's disposition is appended in its entry.
@@ -222,10 +236,9 @@ Header line: `Layer: design — entry. The how + the record of building it. Stat
 - **Build log** — the append-only journal; no "works" claim without the exact command that proves
   it.
 - **Spec-feedback** — intent frictions (`SF-NNN`: slice, assumption, proposed revision), or "none".
-  An SF is `pending` until settled; its disposition —
-  `adjudicated — <link to the intent change that
-  settled it>` or `declined — <one-line why>` — is
-  appended to it, never rewriting the original text.
+  An SF is `pending` until settled; once settled, its disposition is appended to it — `adjudicated`
+  with a link to the intent change that settled it, or `declined` with a one-line why — never
+  rewriting the original text.
 
 ### `design/decisions/NNNN-<slug>.md` (template: `templates/design-decision.md`)
 
