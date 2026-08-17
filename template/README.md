@@ -4,12 +4,15 @@
 > [intent-architecture template](https://github.com/crumley/intent-architecture). To make it yours:
 >
 > 1. Name the system: replace `<System name>` here and in the per-leg READMEs.
-> 2. `mise install && mise run check` — the Markdown gate (format + links) is green before you write
+> 2. Choose a license and commit it as `LICENSE`: the template deliberately ships none — the choice
+>    belongs to this repo's owner, and until one lands the repo is all-rights-reserved by default.
+>    (The template's own MIT terms let you copy, adapt, and relicense it freely.)
+> 3. `mise install && mise run check` — the Markdown gate (format + links) is green before you write
 >    a line (optionally `direnv allow` to put the pinned toolchain on PATH).
-> 3. Write the vision in [`intent/00-foundation/00-vision.md`](intent/00-foundation/00-vision.md),
+> 4. Write the vision in [`intent/00-foundation/00-vision.md`](intent/00-foundation/00-vision.md),
 >    then the principles; grow concepts and subsystems from there — or point an agent with the
 >    intent-architecture skill at the repo and let it mine what you already have.
-> 4. When you start building, open your first design entry (copy
+> 5. When you start building, open your first design entry (copy
 >    [`design/0000-template/`](design/0000-template/README.md)), pick the language toolchain there,
 >    and wire it into the gate (see [`CONTRIBUTING.md`](CONTRIBUTING.md)).
 
