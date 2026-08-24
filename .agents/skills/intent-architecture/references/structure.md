@@ -33,11 +33,14 @@ repo/
 ├── design/                            # the how + the record of building it — organized for BUILDING
 │   ├── README.md
 │   ├── 0000-template/                 # the design-entry template (copy to start a new entry)
-│   │   └── README.md
+│   │   ├── README.md
+│   │   └── spec-feedback.md
 │   ├── decisions/                     # ADRs — one per stack/tooling choice
 │   │   └── 0000-template.md
-│   ├── 0001-<slug>/                   # a design ENTRY (dir); README.md holds scope + design + build log + spec-feedback
-│   │   └── README.md
+│   ├── 0001-<slug>/                   # a design ENTRY (dir)
+│   │   ├── README.md                  #   the design: context + serves-intent + scope + design
+│   │   ├── spec-feedback.md           #   intent frictions found while building, with lifecycle
+│   │   └── build-log.md               #   OPTIONAL journal — only when the build earns one
 │   └── 0002-<slug>/ …                 # entries numbered in the order the work happens
 │
 ├── src/
@@ -81,12 +84,21 @@ of related work. **It does not mirror `intent/`.** The way the build clusters (b
 component, by feature area, by phase) is usually very different from how the domain is explained,
 and that is expected and correct.
 
-Each entry is **self-contained**: its `README.md` follows one common format that holds both the
-_how_ and the record of producing it — **Serves intent · Scope · Design · Build log · Spec-feedback
-· Status** (schema in §3). This is what used to be split into a separate "plan": the scope, the
-journal, and the intent-frictions now live in the entry beside the design. Each entry points back to
-the intent it serves so the trace from purpose to build stays intact, but the **filing** follows the
-build, not the concepts.
+Each entry is **self-contained**: a directory of up to three files, split by who reads them and when
+(schema in §3). `README.md` holds the design in one common format — **Status · Context · Serves
+intent · Scope · Design** — and is essentially frozen once accepted; `spec-feedback.md` holds the
+intent frictions found while building, read on its own at adjudication time; an optional
+`build-log.md` holds the journal, only when the build earns one. This is what used to be split into
+a separate "plan": the scope and the intent-frictions live in the entry beside the design. Each
+entry points back to the intent it serves so the trace from purpose to build stays intact, but the
+**filing** follows the build, not the concepts.
+
+An entry is a **standalone document with a single authorial voice**: it argues its motivation from
+the system — intent slices, prior entries, observed failures — never from who asked for it. No
+owner, brief, directive, agent, or session appears in it, and it quotes no one; whoever commissioned
+the work is delivery metadata and lives with the delivery (the branch, the pull request), not in the
+ledger. And **each fact has one home** within the entry: the summary previews, Scope bounds, Design
+explains — other sections link rather than restate.
 
 **Decisions are factored out.** Stack/tooling **ADRs** live once in **`design/decisions/`** — a
 choice made once for the whole repo (language, runtime, test runner, key libraries). An entry
@@ -224,23 +236,41 @@ Header line: `Layer: intent · subsystem (seam). The contract; design plans the 
   README so the queue is repo-visible rather than living in someone's head or one agent's session
   memory; a line leaves the index when the SF's disposition is appended in its entry.
 
-### `design/NNNN-<slug>/README.md` (template: `templates/design-entry.md`; foundation example: `design-foundation.md`)
+### `design/NNNN-<slug>/` (templates: `templates/design-entry.md` + `design-entry-spec-feedback.md`; foundation example: `design-foundation.md`)
 
-Opening banner: a one-line statement of what the entry builds and why, then
-`**Status:** proposed | in-progress | accepted | superseded by NNNN-<slug>/ · **Started:**
-YYYY-MM-DD`.
+**`README.md`** — opening banner: a **one-or-two-sentence** statement of what the entry builds and
+why (a hard cap), then
+`**Status:** proposed | in-progress | built — awaiting review | accepted | superseded by
+NNNN-<slug>/ · **Started:** YYYY-MM-DD`.
 
+- **Context** — one to three short paragraphs between the status line and the first section: the
+  problem as the system experiences it, what this entry proposes, and why now, linking the prior
+  entries that make the work possible or necessary.
 - **Serves intent** — pointer(s) to the intent slice(s) this entry realizes (may be several; design
-  groups by build, so one entry can span multiple concepts/seams). **Required.**
-- **Scope** — what is in, what is deferred and why, and the acceptance check (the exit test).
+  groups by build, so one entry can span multiple concepts/seams), each with **one sentence** on
+  how. **Required.** Link to intent's words rather than quoting them — a quote goes stale the moment
+  intent is edited, often by this very entry's spec-feedback.
+- **Scope** — what is in (each fact stated once), what is deferred — each deferral with the reason
+  it is acceptable, in prose ("safe to defer because …") — and the acceptance check as a numbered
+  list of executable checks (the exit test).
 - **Design** — the concrete how: structures, formats, tools, algorithms, sequencing; links the ADRs
-  in `decisions/` it rests on.
-- **Build log** — the append-only journal; no "works" claim without the exact command that proves
-  it.
-- **Spec-feedback** — intent frictions (`SF-NNN`: slice, assumption, proposed revision), or "none".
-  An SF is `pending` until settled; once settled, its disposition is appended to it — `adjudicated`
-  with a link to the intent change that settled it, or `declined` with a one-line why — never
-  rewriting the original text.
+  in `decisions/` it rests on. Entry-local decisions each carry the full shape: the alternative
+  considered, what made it attractive, the reason it lost, and the cost of the choice made. Layout
+  records the module **boundaries** established and why, not a file inventory — the commits carry
+  that.
+
+**`spec-feedback.md`** — intent frictions (`SF-NNN`: slice, friction, assumption, proposed
+revision), or "none this entry". Written to be read on its own at adjudication time, without the
+README. An SF is `pending` until settled; once settled, its disposition is appended to it —
+`adjudicated` with a link to the intent change that settled it, or `declined` with a one-line why —
+never rewriting the original text.
+
+**`build-log.md`** — **optional**: created only when the build spans sessions or when building
+forces a discovery worth keeping (a failing test that changed the design, a measured number, a
+defect found in review). One block per iteration: what building forced or revealed, the exact
+commands that prove what works, what is next. Not a changelog — what was done lives in the commits,
+the files touched in the diff, the assertions in the test suite. Absent means the commits and the
+pull request are the whole build record.
 
 ### `design/decisions/NNNN-<slug>.md` (template: `templates/design-decision.md`)
 
@@ -284,21 +314,24 @@ Add them when they fit; omit them for a pure spec repo.
 
 When the repo is where the system is **made to run** as an experiment that feeds back into
 `intent/`, the _act of building_ is captured **inside the design entry**, not in a separate leg. The
-entry's common format already carries it:
+entry's format already carries it:
 
-- **Scope** — the entry's boundary: in / deferred (with why) / acceptance test.
-- **Build log** — the append-only journal, one block per iteration: goal, what was done, what works
-  now (**with the exact command that proves it**), decisions, next.
-- **Spec-feedback** — intent frictions found while building.
+- **Scope** — the entry's boundary: in / deferred (each in prose, "safe to defer because …") /
+  acceptance as a numbered list of executable checks. The acceptance checks are the entry's "works"
+  claims, and the pull request that delivers the entry carries their run — no "works" claim without
+  the exact command that proves it.
+- **`spec-feedback.md`** — intent frictions found while building.
+- **`build-log.md`** — the optional journal, only when the build spans sessions or forces a
+  discovery worth keeping (§3).
 
 Stack/tooling **ADRs** live in **`design/decisions/`**.
 
 The **load-bearing discipline**: the build **does not silently rewrite `intent/`**. When building
-reveals an intent problem, it is recorded in the entry's **Spec-feedback** with a **stable
+reveals an intent problem, it is recorded in the entry's **`spec-feedback.md`** with a **stable
 identifier** (`SF-001`, `SF-002`, …) so a human can cite it precisely, the assumption made to keep
 moving, and a concrete proposed revision — the spec change is left for human review. Because entries
 are numbered and kept, the **diff in `intent/` across entries** is the visible result of the
-experiment. Templates: `design-entry`, `design-decision`.
+experiment. Templates: `design-entry`, `design-entry-spec-feedback`, `design-decision`.
 
 **The spec-feedback lifecycle.** Raising an SF is half the loop; the disposition closes it. An SF is
 `pending` from the moment it is raised — the implicit default, no line needed. Once settled, a
@@ -326,20 +359,23 @@ optional like the rest of this section, scaled to fit:
 
 - **Entry ↔ branch ↔ PR, one to one.** Each entry is built on its own branch and delivered by its
   own PR; the PR body distills the entry — scope, evidence, spec-feedback raised — and links back to
-  it. One unit of review per unit of work.
-- **The commissioning directive, verbatim.** The owner's directive that commissioned the work is
-  quoted word for word at the top of the entry (and the PR). Preserving the exact words is what
-  makes later adjudication possible — a paraphrase loses the ground truth being ruled against.
+  it. One unit of review per unit of work. While the PR awaits the human, the entry's Status reads
+  `built — awaiting review`.
+- **The entry stays standalone.** The commission — who asked, and in what words — is delivery
+  metadata: it may inform the PR body, but the entry never restates or attributes it (the
+  single-voice rule, §2). Adjudication rules against `intent/`, not against anyone's phrasing.
 - **Independent verification before the PR opens.** The orchestrating agent verifies the build
   itself — its own run of the gate, its own smoke test, a read of the entry — rather than relaying
   the builder's report. Gated acts (merge, close) stay with the human.
 - **The concurrency protocol.** Two PRs each green alone can make the main line red when both merge
-  — **file-disjoint is not meaning-disjoint**. So: when entries are built concurrently, each entry's
-  build log **names its shared surfaces**; the second of any concurrently built pair merges only
-  after a rebase and a combined gate run; and after any merge of concurrent work, verify the main
-  line's gate.
+  — **file-disjoint is not meaning-disjoint**. So: when entries are built concurrently, each PR's
+  body **names its shared surfaces**; the second of any concurrently built pair merges only after a
+  rebase and a combined gate run; and after any merge of concurrent work, verify the main line's
+  gate.
 - **Numbers reserved at commission.** Entry numbers are assigned when the work is commissioned, not
-  when it lands, so parallel builds don't collide on "next number in sequence".
+  when it lands, so parallel builds don't collide on "next number in sequence". When a collision or
+  renumbering does happen, it is recorded as **one line** in the entry's context — never a journal
+  iteration — and a reserved number that never lands stays an honest gap in the sequence.
 - **Delivered means reachable.** A forge reporting a PR "merged" is not proof the work reached the
   main line: a stacked PR merged into a stale base after the base's own PR has merged strands the
   work while the forge honestly says "merged". Before an entry's Status moves to accepted or

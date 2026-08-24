@@ -13,8 +13,8 @@ The repo stands on four parallel trees; **`intent` governs the other three** (se
   `02-subsystems/` (the swappable seams, each a contract). Start at
   [`intent/README.md`](intent/README.md).
 - [`design/`](design/) — the **how**, and the **record of building it**: chronological **design
-  entries** (each carrying its scope, the design, an append-only build log, and any intent
-  spec-feedback) plus stack ADRs in `design/decisions/`. Entries are **superseded, not
+  entries** (each: context, scope, the design, and any intent spec-feedback — with a build log only
+  when the build earns one) plus stack ADRs in `design/decisions/`. Entries are **superseded, not
   overwritten**. Organized for building, not a mirror of intent. Start at `design/README.md`.
 - [`src/`](src/) — the code. [`test/`](test/) — the tests.
 
@@ -41,12 +41,13 @@ The repo stands on four parallel trees; **`intent` governs the other three** (se
 - **Capture a requirement** — write the durable what & why into the relevant `intent/` slice; if it
   defers a decision to the build, note it inline (_Left to implementation_).
 - **Plan or do the build** — open a **design entry** (`design/NNNN-<slug>/`, from the template in
-  `design/0000-template/`): name the intent it serves, set its scope, record the _how_, journal the
-  build in its log, and record stack choices as ADRs in `design/decisions/`. A later entry
-  supersedes (never overwrites) the one it replaces. The build authors `design/`, `src/`, `test/`;
-  it does **not** silently rewrite `intent/` — friction goes to the entry's spec-feedback for human
-  review. An accepted spec-feedback rides its **own small intent-edit PR**, never a build PR — the
-  human's merge is the adjudication — while the build proceeds on the SF's stated assumption.
+  `design/0000-template/`): name the intent it serves, set its scope, record the _how_, and record
+  stack choices as ADRs in `design/decisions/`. The entry is a standalone document in a single
+  authorial voice — it argues from the system, never from who asked. A later entry supersedes (never
+  overwrites) the one it replaces. The build authors `design/`, `src/`, `test/`; it does **not**
+  silently rewrite `intent/` — friction goes to the entry's `spec-feedback.md` for human review. An
+  accepted spec-feedback rides its **own small intent-edit PR**, never a build PR — the human's
+  merge is the adjudication — while the build proceeds on the SF's stated assumption.
 
 ## Conventions
 
