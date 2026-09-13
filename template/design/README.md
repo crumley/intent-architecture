@@ -113,10 +113,24 @@ and frictions intact, in the order it happened — means the next build starts f
 learned, and the diff in `intent/` between entries is the visible result: the intent, hardened by
 the act of building the system.
 
-## Open spec-feedback
+## Finding open spec-feedback
 
-The SFs still `pending` across entries — the queue lives here, in the repo, not in someone's head or
-one session's memory. When an entry raises an SF, add a line (id, entry, one-line friction); when
-the SF's disposition is appended in its entry, remove the line here.
+The entries are the queue. Every SF's disposition lives in the entry that raised it, which is the
+one authoritative home; to see what is still open, ask the entries:
 
-None pending.
+```sh
+grep -rn -e '\*\*Status:\*\* *`\?pending' -e '`pending`\.' design/*/
+```
+
+**Why there is no index here.** Earlier revisions of this structure kept a hand-maintained list of
+pending SFs in this README. It is a cache of state the entries already hold, and it drifted in both
+directions in every repo that adopted it — lines left behind after adjudication, SFs raised without
+a line and invisible for weeks. Nothing derived it and nothing checked it, so it quietly stopped
+being true and a reader could not tell. A repo-visible queue is the right goal; a second copy is the
+wrong way to get one. If the grep is too blunt for a large repo, generate the list — never hand-keep
+it.
+
+The two patterns cover the two shapes an SF's status takes (`spec-feedback.md`'s **Status:** line,
+and an inline disposition at the end of an entry's SF bullet). It is a grep, not a parser: a
+`pending` used as ordinary prose can slip in, and the SF heading above each hit is what tells you
+which is which.
