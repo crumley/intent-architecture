@@ -232,9 +232,9 @@ Header line: `Layer: intent · subsystem (seam). The contract; design plans the 
   silent rewrites of `intent/` (including how adjudication happens: each accepted change its own
   small intent-edit PR, the human's merge as the adjudication act); plural techniques converge
   through use.
-- **Open spec-feedback** — a small index of the SFs still `pending` across entries, kept in this
-  README so the queue is repo-visible rather than living in someone's head or one agent's session
-  memory; a line leaves the index when the SF's disposition is appended in its entry.
+- **Finding open spec-feedback** — how to list the SFs still `pending` across entries (a grep over
+  `design/*/`), and why this README keeps no hand-maintained index of them: it would be a second
+  copy of state the entries already hold, and a cache nothing derives is a cache that drifts.
 
 ### `design/NNNN-<slug>/` (templates: `templates/design-entry.md` + `design-entry-spec-feedback.md`; foundation example: `design-foundation.md`)
 
