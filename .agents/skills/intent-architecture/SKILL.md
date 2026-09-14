@@ -168,11 +168,14 @@ are **optional** — add them when they fit; omit them for a pure spec repo.
   not in chat — while the build proceeds meanwhile on the SF's stated assumption. Once settled, the
   SF gets a **disposition** appended (never rewriting its text):
   `adjudicated — <link to the intent change>` or `declined — <one-line why>`; until then it is
-  `pending`, and the design README indexes the pending queue so it lives in the repo, not in
-  someone's head or one session's memory. Because entries are numbered and kept, the _progression_
-  shows: the diff in `intent/` across entries is the visible payoff. (A pure spec repo's entries are
-  just the _how_; a built repo's also carry Scope, `spec-feedback.md`, and the optional build log.)
-  Templates: `design-entry`, `design-entry-spec-feedback`, `design-decision`.
+  `pending`. **Status is the SF's one mutable line** — written from the start, edited in place when
+  it settles, with the SF's reasoning below it never rewritten — so the open queue is
+  `grep -rn '\*\*Status:\*\* *pending' design/*/` rather than a list anyone maintains by hand. A
+  state worth finding has to be written down: pending-as-absence is what made an index necessary,
+  and indexes drift. Because entries are numbered and kept, the _progression_ shows: the diff in
+  `intent/` across entries is the visible payoff. (A pure spec repo's entries are just the _how_; a
+  built repo's also carry Scope, `spec-feedback.md`, and the optional build log.) Templates:
+  `design-entry`, `design-entry-spec-feedback`, `design-decision`.
 - **The delivery shape for agent-built entries.** When entries are built by agents and gated by a
   human: **entry ↔ branch ↔ PR, one to one**, the PR body distilling the entry (scope, evidence, SFs
   raised) with links back to it, and the entry's Status reading `built — awaiting review` while the

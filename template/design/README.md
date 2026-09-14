@@ -113,10 +113,18 @@ and frictions intact, in the order it happened — means the next build starts f
 learned, and the diff in `intent/` between entries is the visible result: the intent, hardened by
 the act of building the system.
 
-## Open spec-feedback
+## Finding open spec-feedback
 
-The SFs still `pending` across entries — the queue lives here, in the repo, not in someone's head or
-one session's memory. When an entry raises an SF, add a line (id, entry, one-line friction); when
-the SF's disposition is appended in its entry, remove the line here.
+The entries are the queue. Each SF carries a `**Status:**` line — its one mutable line, `pending`
+from the start and edited in place when it settles — so what is open is a question the entries
+answer directly:
 
-None pending.
+```sh
+grep -rn '\*\*Status:\*\* *pending' design/*/
+```
+
+**Why there is no index here.** Earlier revisions of this structure kept a hand-maintained list of
+pending SFs in this README, because pending was the _absence_ of a disposition line and absence
+cannot be found any other way. A list nothing derives and nothing checks is a cache, and it drifted
+in practice — SFs adjudicated in their entries left sitting in the index as open. Making `pending` a
+written fact removes the need for the copy: ask the entries, and the answer cannot be stale.
