@@ -13,13 +13,13 @@ triangle, all governed by `intent`.
 
 - **`NNNN-<slug>/`** — the **design entries**, zero-padded, numbered in the order the work happens
   (`0001-…`, `0002-…`). Each entry is a directory of up to three files, split by who reads them and
-  when:
+  when — only `README.md` is always present:
   - **`README.md`** — the design: summary, context, the intent served, scope, and the _how_.
     Essentially frozen once the entry is accepted; later touches are status changes and supersession
     pointers, not rewrites.
-  - **`spec-feedback.md`** — the intent frictions found while building, with their lifecycle. This
-    file is the adjudication surface: it is read on its own, after the build, without the rest of
-    the entry.
+  - **`spec-feedback.md`** — the intent frictions found while building, with their lifecycle;
+    created only when the build raises one (no frictions, no file). This file is the adjudication
+    surface: it is read on its own, after the build, without the rest of the entry.
   - **`build-log.md`** — **optional**: the journal, created only when the build spans sessions or
     when building forces a discovery worth keeping. An entry without one is normal — the commits and
     the pull request are its build record.
@@ -55,8 +55,10 @@ triangle, all governed by `intent`.
   established and why (not a file inventory — the commits carry that), the key mechanisms.
 
 **`spec-feedback.md`** — intent frictions found while building, each with a stable id (`SF-NNN`),
-the slice it touches, the assumption made to keep moving, and a proposed revision — or "none this
-entry." An SF is `pending` until settled; once settled, its disposition is **appended** to it —
+the slice it touches, the assumption made to keep moving, and a proposed revision. The file is
+created only when the build raises an SF: an entry without one is normal, and the absence is the
+record that building found no friction — a file saying "none" is tokens every later reader pays for
+nothing. An SF is `pending` until settled; once settled, its disposition is **appended** to it —
 `adjudicated` with a link to the intent change that settled it, or `declined` with a one-line why —
 never rewriting the original text, so what building surfaced stays on the record.
 

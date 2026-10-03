@@ -39,7 +39,7 @@ repo/
 │   │   └── 0000-template.md
 │   ├── 0001-<slug>/                   # a design ENTRY (dir)
 │   │   ├── README.md                  #   the design: context + serves-intent + scope + design
-│   │   ├── spec-feedback.md           #   intent frictions found while building, with lifecycle
+│   │   ├── spec-feedback.md           #   ONLY when the build raises an SF — frictions + lifecycle
 │   │   └── build-log.md               #   OPTIONAL journal — only when the build earns one
 │   └── 0002-<slug>/ …                 # entries numbered in the order the work happens
 │
@@ -87,11 +87,11 @@ and that is expected and correct.
 Each entry is **self-contained**: a directory of up to three files, split by who reads them and when
 (schema in §3). `README.md` holds the design in one common format — **Status · Context · Serves
 intent · Scope · Design** — and is essentially frozen once accepted; `spec-feedback.md` holds the
-intent frictions found while building, read on its own at adjudication time; an optional
-`build-log.md` holds the journal, only when the build earns one. This is what used to be split into
-a separate "plan": the scope and the intent-frictions live in the entry beside the design. Each
-entry points back to the intent it serves so the trace from purpose to build stays intact, but the
-**filing** follows the build, not the concepts.
+intent frictions found while building, read on its own at adjudication time, and exists only when
+there is at least one; an optional `build-log.md` holds the journal, only when the build earns one.
+This is what used to be split into a separate "plan": the scope and the intent-frictions live in the
+entry beside the design. Each entry points back to the intent it serves so the trace from purpose to
+build stays intact, but the **filing** follows the build, not the concepts.
 
 An entry is a **standalone document with a single authorial voice**: it argues its motivation from
 the system — intent slices, prior entries, observed failures — never from who asked for it. No
@@ -260,10 +260,11 @@ NNNN-<slug>/ · **Started:** YYYY-MM-DD`.
   that.
 
 **`spec-feedback.md`** — intent frictions (`SF-NNN`: slice, friction, assumption, proposed
-revision), or "none this entry". Written to be read on its own at adjudication time, without the
-README. An SF is `pending` until settled; once settled, its disposition is appended to it —
-`adjudicated` with a link to the intent change that settled it, or `declined` with a one-line why —
-never rewriting the original text.
+revision). **Created only when the build raises an SF** — an entry with no frictions has no
+spec-feedback file, and its absence is the record that none were raised. Written to be read on its
+own at adjudication time, without the README. An SF is `pending` until settled; once settled, its
+disposition is appended to it — `adjudicated` with a link to the intent change that settled it, or
+`declined` with a one-line why — never rewriting the original text.
 
 **`build-log.md`** — **optional**: created only when the build spans sessions or when building
 forces a discovery worth keeping (a failing test that changed the design, a measured number, a
@@ -320,7 +321,7 @@ entry's format already carries it:
   acceptance as a numbered list of executable checks. The acceptance checks are the entry's "works"
   claims, and the pull request that delivers the entry carries their run — no "works" claim without
   the exact command that proves it.
-- **`spec-feedback.md`** — intent frictions found while building.
+- **`spec-feedback.md`** — intent frictions found while building; created only when there is one.
 - **`build-log.md`** — the optional journal, only when the build spans sessions or forces a
   discovery worth keeping (§3).
 

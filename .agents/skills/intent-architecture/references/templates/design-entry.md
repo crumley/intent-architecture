@@ -14,9 +14,9 @@ never from who asked for it, and it quotes no one.>
 
 Copy this directory to `NNNN-<slug>/` (next number in sequence) for each unit of build work. Every
 section stays — write "none this entry" rather than deleting one. Spec-feedback lives beside this
-file in [`spec-feedback.md`](spec-feedback.md); a `build-log.md` is optional (see
-[`../README.md`](../README.md) for when it earns its place). The format and the rules it serves are
-in [`../README.md`](../README.md).
+file in [`spec-feedback.md`](spec-feedback.md) — copied only when the build raises an SF; with none,
+leave it out — and a `build-log.md` is optional (see [`../README.md`](../README.md) for when it
+earns its place). The format and the rules it serves are in [`../README.md`](../README.md).
 
 ## Serves intent
 

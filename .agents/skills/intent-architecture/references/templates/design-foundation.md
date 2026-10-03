@@ -8,8 +8,8 @@
 The recommended **first design entry** (`design/0001-foundation/` or similar): the cross-cutting
 architecture and the development/CI flow that later entries build on. It carries the same common
 format as any entry (`design/0000-template/`) — this file is just a worked example of its
-`README.md` for the foundation; the entry's frictions go in its own `spec-feedback.md` (expected
-here: "None this entry," since the foundation touches no domain concept).
+`README.md` for the foundation; the entry's frictions would go in its own `spec-feedback.md`, but
+the foundation touches no domain concept, so it typically raises none and has no such file.
 
 ## Serves intent
 
