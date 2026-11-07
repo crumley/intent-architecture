@@ -1,5 +1,6 @@
-# Toolchain + tasks for this repo (mise). This repo is Markdown-only at the root;
-# the template under template/ carries its own mise.toml with the full code gate.
+# Toolchain + tasks for this repo (mise). The root is Markdown; the template under
+# template/ and the review tool under tools/review/ each carry their own mise.toml
+# and gate, run from here by template-check and review-check.
 #
 #   mise install     # provision the pinned tools (dprint, lychee)
 #   mise run fmt     # format all Markdown in place
@@ -28,3 +29,7 @@ depends = ["lint", "links"]
 [tasks.template-check]
 description = "Prove the template's own gate is green from a cold copy"
 run = "mise --cd template install && mise --cd template run check"
+
+[tasks.review-check]
+description = "The review tool's gate: lint, types, tests, and the bundle drift check"
+run = "mise --cd tools/review install && mise --cd tools/review run check"

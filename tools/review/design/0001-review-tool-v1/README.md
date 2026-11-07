@@ -5,7 +5,7 @@
 > base), and a loopback review page — shipped as one Node file inside the skill — on which a human
 > rules, annotates any file, and submits.
 >
-> **Status:** in-progress · **Started:** 2026-11-07
+> **Status:** built — awaiting review · **Started:** 2026-11-07
 
 An intent-architecture repository's open spec-feedback is a grep away
 ([`structure.md`](../../../../.agents/skills/intent-architecture/references/structure.md#the-build-record-lives-in-design-there-is-no-separate-plan-leg)),
