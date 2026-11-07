@@ -9,7 +9,7 @@ description: >-
   Markdown check gate), migrate an existing repo into it, extract intent (the durable what & why)
   from existing docs and code, or explain the rules, directory/file structure, file sections,
   AGENTS.md, and per-level READMEs that govern it — including the optional build-record disciplines:
-  the spec-feedback adjudication lifecycle and the delivery shape for agent-built entries.
+  the intent-feedback adjudication lifecycle and the delivery shape for agent-built entries.
   General-purpose: contains no project-specific content.
 ---
 
@@ -18,12 +18,12 @@ description: >-
 This skill sets up — or refactors an existing repository into — a structure where a **durable
 statement of intent governs everything else**. The repo stands on four parallel trees:
 
-| Leg       | What it holds                                                                                                                                                                                                                                                                                                      | Rate of change                                       |
-| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------- |
-| `intent/` | The durable **what & why** — purpose, concepts, and constraints.                                                                                                                                                                                                                                                   | Only when understanding of the system changes.       |
-| `design/` | The **how**, and the **chronological record of building it** — numbered **design entries** (each: context, scope, design; spec-feedback only when the build raises some, a build log only when the build earns one) plus stack ADRs in `design/decisions/`, in the order made and **superseded, not overwritten**. | Appends as the build proceeds; old entries are kept. |
-| `src/`    | The code that implements the design.                                                                                                                                                                                                                                                                               | Moves with `design`.                                 |
-| `test/`   | Tests holding the code to the design **and** the intent.                                                                                                                                                                                                                                                           | Moves with `design`.                                 |
+| Leg       | What it holds                                                                                                                                                                                                                                                                                                        | Rate of change                                       |
+| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| `intent/` | The durable **what & why** — purpose, concepts, and constraints.                                                                                                                                                                                                                                                     | Only when understanding of the system changes.       |
+| `design/` | The **how**, and the **chronological record of building it** — numbered **design entries** (each: context, scope, design; intent feedback only when the build raises some, a build log only when the build earns one) plus stack ADRs in `design/decisions/`, in the order made and **superseded, not overwritten**. | Appends as the build proceeds; old entries are kept. |
+| `src/`    | The code that implements the design.                                                                                                                                                                                                                                                                                 | Moves with `design`.                                 |
+| `test/`   | Tests holding the code to the design **and** the intent.                                                                                                                                                                                                                                                             | Moves with `design`.                                 |
 
 `design` + `src` + `test` form a triangle that moves together. **`intent` sits above them and
 governs all three.** A change that must touch `intent` means you _learned something about the system
@@ -33,7 +33,7 @@ Plus, at the root, an **`AGENTS.md`** (harness-neutral guidance for any agent/hu
 repo) and a **`README.md`** (the orientation door). Each leg has its own `README.md` too.
 
 This skill is **general-purpose** — it carries no domain content. You supply the domain by mining
-the target repository. Ready-to-copy skeletons live in `references/templates/`; the full layout spec
+the target repository. Ready-to-copy skeletons live in `references/templates/`; the layout reference
 and file-section schemas live in `references/structure.md`; and a complete, ready-to-run repository
 template (the four legs plus a pinned Markdown check gate) lives in the skill's home repository
 under [`template/`](https://github.com/crumley/intent-architecture/tree/main/template).
@@ -110,7 +110,7 @@ repo/
 │   ├── README.md                  # what design is; the entry format; the Serves-intent rule
 │   ├── 0000-template/             # the design-entry template (copy to start a new entry)
 │   ├── decisions/                 # ADRs — one per stack/tooling choice (start: 0000-template.md)
-│   └── NNNN-<slug>/               # design entries: README.md (the design) (+ spec-feedback.md, build-log.md when earned)
+│   └── NNNN-<slug>/               # design entries: README.md (the design) (+ intent-feedback.md, build-log.md when earned)
 │
 ├── src/
 │   └── README.md                  # implements design; layout mirrors design (itself a design choice)
@@ -122,20 +122,21 @@ repo/
 design is organized for _building_ — which happens over time, in units of related work that may look
 nothing like the concept/subsystem breakdown. Each unit is a numbered **design entry**
 (`NNNN-<slug>/`); a recommended first entry is the **foundation** (global architecture + dev flow).
-See `references/structure.md` for the full spec and the file-section schemas.
+See `references/structure.md` for the full layout reference and the file-section schemas.
 
 **A design entry is self-contained** — a directory of up to three files, split by who reads them and
 when. `README.md` follows one **common format** — _Status · Context · Serves intent · Scope ·
-Design_ — and is essentially frozen once accepted; `spec-feedback.md` holds the intent frictions
-found while building, read on its own at adjudication time — created only when the build raises an
-SF (no frictions, no file); an optional `build-log.md` holds the journal, only when the build spans
-sessions or forces a discovery worth keeping. Together they hold both the _how_ and the record of
-producing it (what used to be split into a separate "plan"). **Stack/tooling ADRs** live once, in
-**`design/decisions/`**, and entries link them. An entry is a **standalone document with a single
-authorial voice**: it argues its motivation from the system — intent slices, prior entries, observed
-failures — never from who asked for it (no owner, brief, directive, agent, or session appears in it,
-and it quotes no one), and **each fact has one home** inside it — the summary previews, Scope
-bounds, Design explains; other sections link, never restate.
+Design_ — and is essentially frozen once accepted; `intent-feedback.md` holds the **intent
+feedback** — the build pushing back on the intent, each item an **IF** (`IF-NNN`) — read on its own
+at adjudication time and created only when the build raises an IF (no frictions, no file); an
+optional `build-log.md` holds the journal, only when the build spans sessions or forces a discovery
+worth keeping. Together they hold both the _how_ and the record of producing it (what used to be
+split into a separate "plan"). **Stack/tooling ADRs** live once, in **`design/decisions/`**, and
+entries link them. An entry is a **standalone document with a single authorial voice**: it argues
+its motivation from the system — intent slices, prior entries, observed failures — never from who
+asked for it (no owner, brief, directive, agent, or session appears in it, and it quotes no one),
+and **each fact has one home** inside it — the summary previews, Scope bounds, Design explains;
+other sections link, never restate.
 
 **`design/` is a record, not a mirror.** Entries are filed in the order made and **superseded by
 appending, not overwriting** — when work is re-done later, the new entry marks what it replaces and
@@ -149,34 +150,37 @@ payoff.
 ## Optional: the build record, the delivery shape, and contribution guidelines
 
 Three things earn their keep in repos that are **where a system is built**, not only specified. All
-are **optional** — add them when they fit; omit them for a pure spec repo.
+are **optional** — add them when they fit; omit them for an intent-only repo.
 
 - **The build record lives in `design/` itself** (there is **no separate `plan/` leg** — it folds
   into design). When the repo is also where the system is _made to run_ as an experiment that feeds
   back into `intent/`, a design entry carries not just the _how_ but the **act of building** it: its
   **Scope** (boundary + deferrals in prose + acceptance as numbered executable checks, whose run the
-  delivering PR carries — no "works" claim without the exact command), its **`spec-feedback.md`**
-  (intent frictions found while building — the file exists only when there is at least one SF), and
+  delivering PR carries — no "works" claim without the exact command), its **`intent-feedback.md`**
+  (intent frictions found while building — the file exists only when there is at least one IF), and
   an optional **`build-log.md`** (only when the build spans sessions or forces a discovery worth
   keeping — what building forced or revealed, never a changelog of what the commits already show).
   Stack/tooling choices are **ADRs in `design/decisions/`**. The load-bearing discipline: **the
   build does not silently rewrite `intent/`** — a friction is recorded in the entry's
-  `spec-feedback.md` with a **stable identifier** (`SF-001`, …, so a human can cite it precisely)
-  and a concrete proposed revision, and the build proceeds on a stated assumption, leaving the spec
-  change for human review. Adjudication has a shape of its own: each accepted change is its **own
-  small intent-edit PR**, never bundled into a build PR (kept separate it stays reviewable and
+  `intent-feedback.md` with a **stable identifier** (`IF-001`, …, so a human can cite it precisely)
+  and a concrete proposed revision, and the build proceeds on a stated assumption, leaving the
+  intent change for human review. Adjudication has a shape of its own: each accepted change is its
+  **own small intent-edit PR**, never bundled into a build PR (kept separate it stays reviewable and
   atomic, and a build PR cannot smuggle intent edits past review); the human's **merge is the
   adjudication act** — auditable in history, not in chat — while the build proceeds meanwhile on the
-  SF's stated assumption. Once settled, the SF gets a **disposition** appended (never rewriting its
+  IF's stated assumption. Once settled, the IF gets a **disposition** appended (never rewriting its
   text): `adjudicated — <link to the intent change>` or `declined — <one-line why>`; until then it
   is `pending` — and because the disposition lives in the entry, the open queue is a grep over
   `design/*/` rather than a list anyone maintains by hand. Because entries are numbered and kept,
-  the _progression_ shows: the diff in `intent/` across entries is the visible payoff. (A pure spec
-  repo's entries are just the _how_; a built repo's also carry Scope, and — when earned —
-  `spec-feedback.md` and the build log.) Templates: `design-entry`, `design-entry-spec-feedback`,
-  `design-decision`.
+  the _progression_ shows: the diff in `intent/` across entries is the visible payoff. (An
+  intent-only repo's entries are just the _how_; a built repo's also carry Scope, and — when earned
+  — `intent-feedback.md` and the build log.) Templates: `design-entry`,
+  `design-entry-intent-feedback`, `design-decision`. Intent feedback was once called spec feedback
+  (`spec-feedback.md`, `SF-NNN`): read the legacy spelling as the same thing, write only the new
+  one, and migrate a repo still on it per _Migrating a repo from spec feedback_ in
+  `references/structure.md` §6.
 - **The delivery shape for agent-built entries.** When entries are built by agents and gated by a
-  human: **entry ↔ branch ↔ PR, one to one**, the PR body distilling the entry (scope, evidence, SFs
+  human: **entry ↔ branch ↔ PR, one to one**, the PR body distilling the entry (scope, evidence, IFs
   raised) with links back to it, and the entry's Status reading `built — awaiting review` while the
   PR awaits the human; the **entry stays standalone** — the commission (who asked, in what words) is
   delivery metadata that may inform the PR body but is never restated or attributed in the entry,
@@ -304,8 +308,8 @@ concepts, because a gap shows up as a step the walkthrough cannot narrate.
 
 `design/` holds numbered **design entries**, filed in the order the work happens — not as a mirror
 of `intent/`. Each entry is a directory: a `README.md` in the common format (_Status · Context ·
-Serves intent · Scope · Design_), plus a `spec-feedback.md` and a `build-log.md` only when earned —
-together the _how_ and the record of building it. Typically:
+Serves intent · Scope · Design_), plus an `intent-feedback.md` and a `build-log.md` only when earned
+— together the _how_ and the record of building it. Typically:
 
 - Start with a **foundation entry** (recommended first step): the global architecture and dev flow —
   language/runtime, repo and module layout, the toolchain and its single check gate.
@@ -353,7 +357,7 @@ The four-leg skeleton and the rules are invariant. The _contents_ are not: the n
 files, whether a repo needs `01-concepts/` vs. only `02-subsystems/`, and how `design/` is organized
 all depend on the target. A tiny library may need only `intent/00-foundation/` and a single design
 entry; a large system may need many concepts, seams, and entries. The build-record depth of
-`design/` (the Scope / Build-log / Spec-feedback in entries, and ADRs in `decisions/`), the delivery
-shape, and `CONTRIBUTING.md` are likewise scaled to fit — add them only when the repo is _built_,
-not merely specified. Scale the structure to the repo, but never collapse the **what/why ↔ how
-boundary** or the **one-home** rule — those are what make it work.
+`design/` (the Scope, build log, and intent feedback in entries, and ADRs in `decisions/`), the
+delivery shape, and `CONTRIBUTING.md` are likewise scaled to fit — add them only when the repo is
+_built_, not merely specified. Scale the structure to the repo, but never collapse the **what/why ↔
+how boundary** or the **one-home** rule — those are what make it work.

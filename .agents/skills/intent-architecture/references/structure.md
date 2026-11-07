@@ -1,4 +1,4 @@
-# Full layout spec and file-section schemas
+# Full layout reference and file-section schemas
 
 This is the complete reference for the intent-governed four-leg structure. `SKILL.md` gives the
 overview and the workflow; this file gives the directory layout, what each file owns, and the
@@ -34,12 +34,12 @@ repo/
 │   ├── README.md
 │   ├── 0000-template/                 # the design-entry template (copy to start a new entry)
 │   │   ├── README.md
-│   │   └── spec-feedback.md
+│   │   └── intent-feedback.md
 │   ├── decisions/                     # ADRs — one per stack/tooling choice
 │   │   └── 0000-template.md
 │   ├── 0001-<slug>/                   # a design ENTRY (dir)
 │   │   ├── README.md                  #   the design: context + serves-intent + scope + design
-│   │   ├── spec-feedback.md           #   ONLY when the build raises an SF — frictions + lifecycle
+│   │   ├── intent-feedback.md           #   ONLY when the build raises an IF — frictions + lifecycle
 │   │   └── build-log.md               #   OPTIONAL journal — only when the build earns one
 │   └── 0002-<slug>/ …                 # entries numbered in the order the work happens
 │
@@ -86,12 +86,14 @@ and that is expected and correct.
 
 Each entry is **self-contained**: a directory of up to three files, split by who reads them and when
 (schema in §3). `README.md` holds the design in one common format — **Status · Context · Serves
-intent · Scope · Design** — and is essentially frozen once accepted; `spec-feedback.md` holds the
-intent frictions found while building, read on its own at adjudication time, and exists only when
-there is at least one; an optional `build-log.md` holds the journal, only when the build earns one.
-This is what used to be split into a separate "plan": the scope and the intent-frictions live in the
-entry beside the design. Each entry points back to the intent it serves so the trace from purpose to
-build stays intact, but the **filing** follows the build, not the concepts.
+intent · Scope · Design** — and is essentially frozen once accepted; `intent-feedback.md` holds the
+**intent feedback** — frictions found while building, where the build pushes back on the intent;
+each item is an **IF** (an intent-feedback item, id `IF-NNN`) — read on its own at adjudication
+time, and exists only when there is at least one IF; an optional `build-log.md` holds the journal,
+only when the build earns one. This is what used to be split into a separate "plan": the scope and
+the intent feedback live in the entry beside the design. Each entry points back to the intent it
+serves so the trace from purpose to build stays intact, but the **filing** follows the build, not
+the concepts.
 
 An entry is a **standalone document with a single authorial voice**: it argues its motivation from
 the system — intent slices, prior entries, observed failures — never from who asked for it. No
@@ -111,7 +113,7 @@ replaces and links back; the old entry stays (its Status points forward), so _wh
 survives. A cancelled or abandoned entry likewise keeps its number and its record — a gap in the
 sequence is honest history, and renumbering would falsify the lineage. Intent is the fresh tip;
 design is the lineage that got there — and the diff in `intent/` across entries is the visible
-payoff of a build feeding back into the spec.
+payoff of a build feeding back into the intent.
 
 **Plural techniques converge through use.** When an entry realizes a mechanism the intent
 deliberately left open, it may build **more than one technique behind the same contract** — a
@@ -228,15 +230,15 @@ Header line: `Layer: intent · subsystem (seam). The contract; design plans the 
   **not** a mirror of intent.
 - **The common entry format** (the entry sections) and the **`decisions/`** folder of ADRs.
 - **The rules that keep it honest** — Serves-intent; append/supersede, never overwrite (a cancelled
-  entry keeps its number and record — a gap in the sequence is honest history); spec-feedback, not
+  entry keeps its number and record — a gap in the sequence is honest history); intent feedback, not
   silent rewrites of `intent/` (including how adjudication happens: each accepted change its own
   small intent-edit PR, the human's merge as the adjudication act); plural techniques converge
   through use.
-- **Finding open spec-feedback** — how to list the SFs still `pending` across entries (a grep over
+- **Finding open intent feedback** — how to list the IFs still `pending` across entries (a grep over
   `design/*/`), and why this README keeps no hand-maintained index of them: it would be a second
   copy of state the entries already hold, and a cache nothing derives is a cache that drifts.
 
-### `design/NNNN-<slug>/` (templates: `templates/design-entry.md` + `design-entry-spec-feedback.md`; foundation example: `design-foundation.md`)
+### `design/NNNN-<slug>/` (templates: `templates/design-entry.md` + `design-entry-intent-feedback.md`; foundation example: `design-foundation.md`)
 
 **`README.md`** — opening banner: a **one-or-two-sentence** statement of what the entry builds and
 why (a hard cap), then
@@ -249,7 +251,7 @@ NNNN-<slug>/ · **Started:** YYYY-MM-DD`.
 - **Serves intent** — pointer(s) to the intent slice(s) this entry realizes (may be several; design
   groups by build, so one entry can span multiple concepts/seams), each with **one sentence** on
   how. **Required.** Link to intent's words rather than quoting them — a quote goes stale the moment
-  intent is edited, often by this very entry's spec-feedback.
+  intent is edited, often by this very entry's intent feedback.
 - **Scope** — what is in (each fact stated once), what is deferred — each deferral with the reason
   it is acceptable, in prose ("safe to defer because …") — and the acceptance check as a numbered
   list of executable checks (the exit test).
@@ -259,10 +261,10 @@ NNNN-<slug>/ · **Started:** YYYY-MM-DD`.
   records the module **boundaries** established and why, not a file inventory — the commits carry
   that.
 
-**`spec-feedback.md`** — intent frictions (`SF-NNN`: slice, friction, assumption, proposed
-revision). **Created only when the build raises an SF** — an entry with no frictions has no
-spec-feedback file, and its absence is the record that none were raised. Written to be read on its
-own at adjudication time, without the README. An SF is `pending` until settled; once settled, its
+**`intent-feedback.md`** — intent frictions (`IF-NNN`: slice, friction, assumption, proposed
+revision). **Created only when the build raises an IF** — an entry with no frictions has no
+intent-feedback file, and its absence is the record that none were raised. Written to be read on its
+own at adjudication time, without the README. An IF is `pending` until settled; once settled, its
 disposition is appended to it — `adjudicated` with a link to the intent change that settled it, or
 `declined` with a one-line why — never rewriting the original text.
 
@@ -309,7 +311,7 @@ one-home rule applied to contracts.
 ## 6. Optional depth: the build record, the delivery shape, and `CONTRIBUTING.md`
 
 These are **optional** additions for repos that are _where a system is built_, not only specified.
-Add them when they fit; omit them for a pure spec repo.
+Add them when they fit; omit them for an intent-only repo.
 
 ### The build record lives in `design/` (there is no separate `plan/` leg)
 
@@ -321,37 +323,75 @@ entry's format already carries it:
   acceptance as a numbered list of executable checks. The acceptance checks are the entry's "works"
   claims, and the pull request that delivers the entry carries their run — no "works" claim without
   the exact command that proves it.
-- **`spec-feedback.md`** — intent frictions found while building; created only when there is one.
+- **`intent-feedback.md`** — intent frictions found while building; created only when there is one.
 - **`build-log.md`** — the optional journal, only when the build spans sessions or forces a
   discovery worth keeping (§3).
 
 Stack/tooling **ADRs** live in **`design/decisions/`**.
 
 The **load-bearing discipline**: the build **does not silently rewrite `intent/`**. When building
-reveals an intent problem, it is recorded in the entry's **`spec-feedback.md`** with a **stable
-identifier** (`SF-001`, `SF-002`, …) so a human can cite it precisely, the assumption made to keep
-moving, and a concrete proposed revision — the spec change is left for human review. Because entries
-are numbered and kept, the **diff in `intent/` across entries** is the visible result of the
-experiment. Templates: `design-entry`, `design-entry-spec-feedback`, `design-decision`.
+reveals an intent problem, it is recorded in the entry's **`intent-feedback.md`** with a **stable
+identifier** (`IF-001`, `IF-002`, …) so a human can cite it precisely, the assumption made to keep
+moving, and a concrete proposed revision — the intent change is left for human review. Because
+entries are numbered and kept, the **diff in `intent/` across entries** is the visible result of the
+experiment. Templates: `design-entry`, `design-entry-intent-feedback`, `design-decision`.
 
-**The spec-feedback lifecycle.** Raising an SF is half the loop; the disposition closes it. An SF is
-`pending` from the moment it is raised — the implicit default, no line needed. Once settled, a
+**The intent-feedback lifecycle.** Raising an IF is half the loop; the disposition closes it. An IF
+is `pending` from the moment it is raised — the implicit default, no line needed. Once settled, a
 **disposition line is appended** to it, never rewriting the original text:
 `adjudicated — <link to the intent PR/commit/entry that settled it>` or `declined — <one-line why>`.
-The design README carries a small index of the SFs still pending across entries. **Why:** without a
-recorded disposition, the open-SF queue lives in someone's head or one agent's session memory —
-exactly the unrecorded state this structure exists to eliminate.
+**Why:** without a recorded disposition, the open-IF queue lives in someone's head or one agent's
+session memory — exactly the unrecorded state this structure exists to eliminate. Because the
+disposition lives in the entry, the queue is derived, never kept: the design README documents a grep
+over the entries rather than an index of pending IFs (a hand-kept index is a second copy of state
+the entries already hold, and it drifts):
+
+```sh
+grep -rn -e '\*\*Status:\*\* *`\?pending' -e '`pending`\.' design/*/
+```
+
+The first pattern finds an `intent-feedback.md` **Status:** line; the second, an inline disposition
+at the end of an IF bullet. The glob is `design/*/`, not `design/*/intent-feedback.md`, so the
+inline shape is found wherever an entry keeps it.
 
 **How adjudication happens.** The friction is discussed with the owner, and each decision becomes
 its **own small intent-edit change** — its own branch and PR, **never bundled into a build PR**.
 Small separate PRs keep each adjudication reviewable and atomic; never bundling keeps a build PR
 from smuggling intent changes past review. The human's **merge is the adjudication act** — the
 decision is auditable in history rather than in chat. The build does not wait: it proceeds on the
-SF's stated assumption, and on merge the SF gets its disposition backlink.
+IF's stated assumption, and on merge the IF gets its disposition backlink.
 
-(Earlier versions of this structure used a separate `plan/` leg for scope/log/spec-feedback plus
+(Earlier versions of this structure used a separate `plan/` leg for scope/log/intent feedback plus
 ADRs; that **folds into `design/`** — the entry carries the build record, `design/decisions/`
 carries the ADRs. Distinguish the one-time **ADR** from the evolving **entry**.)
+
+### Migrating a repo from spec feedback
+
+Earlier versions of this structure called intent feedback **spec feedback**: the file was
+`spec-feedback.md` and the ids `SF-NNN`. The name was ambiguous — the structure has no spec separate
+from the intent, and "the spec" always meant the intent — so it is now **intent feedback**,
+`intent-feedback.md`, `IF-NNN`. To migrate a repo that uses the old spelling:
+
+1. **Rename the files** with `git mv`, so history follows them: each `design/*/spec-feedback.md`
+   becomes `design/*/intent-feedback.md`, and the entry template's copy in `design/0000-template/`
+   with them.
+2. **Rewrite the current documents**: `SF-NNN` becomes `IF-NNN` (same number), and the vocabulary
+   moves with it — "spec feedback" / "spec-feedback" becomes "intent feedback" / "intent-feedback",
+   "an SF" / "SFs" becomes "an IF" / "IFs", and any other "spec" that means the intent becomes
+   "intent". Current documents are everything that states the present: `intent/`, the design entries
+   and their READMEs, `AGENTS.md`, `CONTRIBUTING.md`, the per-leg READMEs, and code comments.
+3. **Leave dated history alone**: build logs, journals, archived captures, and git history (commit
+   messages, PR titles and bodies) keep the spelling they were written in. Rewriting them would
+   falsify the record, and they stay citable as written.
+4. **Fix the links** that named `spec-feedback.md`, and run the repo's link check.
+5. **Record the legacy spelling once**, in the repo's `design/README.md`, so old commits and PRs
+   remain citable — for example: "`SF-NNN` is the legacy spelling of `IF-NNN`: intent feedback was
+   once called spec feedback (`spec-feedback.md`). Dated history keeps the old spelling; `SF-012` in
+   an old commit or PR means `IF-012` in the same entry."
+
+Tools and agents **accept the legacy spelling when reading** — an `SF-NNN` id, a `spec-feedback.md`
+file, or an "SF" in a dated record means the same item as its `IF-` form — and **write only the new
+one**.
 
 ### The delivery shape for agent-built entries
 
@@ -359,9 +399,9 @@ When design entries are built by agents and gated by a human, give the delivery 
 optional like the rest of this section, scaled to fit:
 
 - **Entry ↔ branch ↔ PR, one to one.** Each entry is built on its own branch and delivered by its
-  own PR; the PR body distills the entry — scope, evidence, spec-feedback raised — and links back to
-  it. One unit of review per unit of work. While the PR awaits the human, the entry's Status reads
-  `built — awaiting review`.
+  own PR; the PR body distills the entry — scope, evidence, intent feedback raised — and links back
+  to it. One unit of review per unit of work. While the PR awaits the human, the entry's Status
+  reads `built — awaiting review`.
 - **The entry stays standalone.** The commission — who asked, and in what words — is delivery
   metadata: it may inform the PR body, but the entry never restates or attributes it (the
   single-voice rule, §2). Adjudication rules against `intent/`, not against anyone's phrasing.
