@@ -168,6 +168,29 @@ describe('submit', () => {
   });
 });
 
+describe('themes and preferences', () => {
+  test('custom themes, the starting theme, and saved preferences are served', async () => {
+    const dir = tempDir();
+    const prefsPath = join(dir, 'cfg', 'prefs.json');
+    const s = await start(packet(), {
+      themes: [],
+      initialTheme: 'gyokuro-light',
+      themeDir: join(dir, 'themes'),
+      prefsPath,
+    });
+    expect((await api(s, 'GET', '/api/themes')).body).toEqual({
+      themes: [],
+      initial: 'gyokuro-light',
+      dir: join(dir, 'themes'),
+      prefs: {},
+    });
+    expect((await api(s, 'PUT', '/api/prefs', { theme: 'neutral-dark' })).status).toBe(200);
+    expect(JSON.parse(readFileSync(prefsPath, 'utf8'))).toEqual({ theme: 'neutral-dark' });
+    expect((await api(s, 'GET', '/api/themes')).body.prefs).toEqual({ theme: 'neutral-dark' });
+    expect((await api(s, 'PUT', '/api/prefs', { theme: 'x;y' })).status).toBe(400);
+  });
+});
+
 test('writeFileAtomic replaces whole and leaves no temp file', () => {
   const dir = tempDir();
   const f = join(dir, 'd.json');
@@ -192,11 +215,21 @@ afterEach(async () => {
   await Promise.all(open.splice(0).map((h) => h.close()));
 });
 
-async function start(p = packet()): Promise<Started> {
+async function start(
+  p = packet(),
+  extra: Partial<Parameters<typeof serve>[0]> = {},
+): Promise<Started> {
   const dir = tempDir();
   const out = join(dir, 'decisions.json');
   const draft = draftPathFor(out);
-  const handle = await serve({ packet: p, digest: DIGEST, out, draft, html: '<html>page</html>' });
+  const handle = await serve({
+    packet: p,
+    digest: DIGEST,
+    out,
+    draft,
+    html: '<html>page</html>',
+    ...extra,
+  });
   open.push(handle);
   return { handle, token: handle.token, port: handle.port, url: handle.url, dir, out, draft };
 }

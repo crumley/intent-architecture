@@ -3,7 +3,7 @@
 // the page beyond the HTML string it is handed.
 
 import { randomBytes } from 'node:crypto';
-import { readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { basename, dirname, join } from 'node:path';
@@ -20,6 +20,7 @@ import {
   validateDraft,
   validateSubmission,
 } from './schema.ts';
+import type { Theme } from './themes.ts';
 
 export type ServeOptions = {
   packet: Packet;
@@ -30,6 +31,11 @@ export type ServeOptions = {
   port?: number;
   token?: string;
   now?: () => Date;
+  /** Custom themes (resolved), the theme to start in, and where preferences live. */
+  themes?: Theme[];
+  initialTheme?: string;
+  themeDir?: string;
+  prefsPath?: string;
 };
 
 export type ServeOutcome =
@@ -107,6 +113,32 @@ export async function serve(opts: ServeOptions): Promise<ServeHandle> {
     switch (route) {
       case 'GET /api/packet':
         return send(res, 200, { packet: opts.packet, digest: opts.digest, draftPath: opts.draft });
+      case 'GET /api/themes':
+        return send(res, 200, {
+          themes: opts.themes ?? [],
+          initial: opts.initialTheme ?? null,
+          dir: opts.themeDir ?? null,
+          prefs: readPrefs(opts.prefsPath),
+        });
+      case 'PUT /api/prefs': {
+        const body = await readJson(req);
+        const theme = body.ok ? (body.value as { theme?: unknown }).theme : undefined;
+        if (typeof theme !== 'string' || !/^[a-z0-9-]{1,41}$/.test(theme)) {
+          return send(res, 400, { errors: [{ path: 'theme', message: 'a theme id' }] });
+        }
+        if (opts.prefsPath) {
+          try {
+            mkdirSync(dirname(opts.prefsPath), { recursive: true });
+            writeFileAtomic(
+              opts.prefsPath,
+              `${JSON.stringify({ ...readPrefs(opts.prefsPath), theme }, null, 2)}\n`,
+            );
+          } catch {
+            // preferences are a convenience; a read-only home must not break a review
+          }
+        }
+        return send(res, 200, { theme });
+      }
       case 'GET /api/draft':
         return send(res, 200, readDraft(opts.draft, opts.digest));
       case 'PUT /api/draft': {
@@ -167,6 +199,16 @@ export async function serve(opts: ServeOptions): Promise<ServeHandle> {
         server.closeAllConnections();
       }),
   };
+}
+
+function readPrefs(path: string | undefined): { theme?: string } {
+  if (!path) return {};
+  try {
+    const v = JSON.parse(readFileSync(path, 'utf8')) as { theme?: unknown };
+    return typeof v.theme === 'string' ? { theme: v.theme } : {};
+  } catch {
+    return {};
+  }
 }
 
 function readDraft(

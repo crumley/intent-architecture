@@ -6,8 +6,15 @@
 
 import { type HlState, highlightLine, type Lang } from './highlight.ts';
 
-export type Range = { start: number; end: number; cls: string; id?: string };
-export type Segment = { start: number; end: number; text: string; cls: string[]; ids: string[] };
+export type Range = { start: number; end: number; cls: string; id?: string; link?: string };
+export type Segment = {
+  start: number;
+  end: number;
+  text: string;
+  cls: string[];
+  ids: string[];
+  links: string[];
+};
 export type Line = { n: number; start: number; end: number; cls: string; segments: Segment[] };
 
 // Inline Markdown may wrap across a hard line break (the source is hard-wrapped
@@ -128,6 +135,7 @@ export function segment(text: string, start: number, end: number, ranges: Range[
       text: text.slice(s, e),
       cls: [...new Set(cover.flatMap((r) => r.cls.split(' ').filter(Boolean)))],
       ids: [...new Set(cover.flatMap((r) => (r.id === undefined ? [] : [r.id])))],
+      links: [...new Set(cover.flatMap((r) => (r.link === undefined ? [] : [r.link])))],
     });
   }
   return out;
@@ -167,6 +175,7 @@ export function renderLines(text: string, lang: Lang = 'markdown', marks: Range[
       if (m.end > start && m.start < end) {
         const r: Range = { start: Math.max(m.start, start), end: Math.min(m.end, end), cls: m.cls };
         if (m.id !== undefined) r.id = m.id;
+        if (m.link !== undefined) r.link = m.link;
         all.push(r);
       }
     }

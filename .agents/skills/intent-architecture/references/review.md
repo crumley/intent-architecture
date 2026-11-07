@@ -76,6 +76,9 @@ can write. For every item you keep:
 - **The proposal as an edit.** Turn the SF's proposed revision into `proposal.edits`: `before`
   copied verbatim from the file, `after` the revised text. Edits are against the snapshot; when two
   items edit the same passage, give each its own edit and say in `relations` how they compose.
+- **Write identifiers, not descriptions.** The page links SF ids (`SF-005`, `0051 SF-001`), design
+  entry numbers (`0031`), decisions (`ADR 0006`), and repository paths wherever they appear in the
+  packet's text, with a peek on hover — so cite them rather than paraphrasing what they are.
 - **The analysis, fair.** `summary` (what the item is really about, two or three sentences),
   `ifAccepted` and `ifDeclined` (concrete consequences in this repository), `relations` (other items
   it touches), and `recommendation` (`verdict` + one-line `why`). Fairness is the job: state the
@@ -111,8 +114,13 @@ node <skill-dir>/scripts/review.mjs serve --packet <scratch>/packet.json --out <
 
 Run it as a long-running or background process and **wait for it to exit**; do not stop it. It
 prints `review: open <url>` — give the human that exact URL (it carries an access token; `--open`
-also opens it in their browser), say what the packet holds, and that their work autosaves. Deep
-links work: `<url>#item=<id>`, `#file=<path>`, `#view=submit`.
+also opens it in their browser), say what the packet holds, and that their work autosaves.
+
+The page opens on a **home page** that explains the review, what the human is asked to do (with
+counts), how to work through it, every view, ruling, note kind, and key — so you need not repeat
+that. Deep links land elsewhere: `<url>#item=<id>`, `#file=<path>`,
+`#view=queue|files|dashboard|submit`. `--theme <id|file.json>` starts in a theme; the human can also
+pick one in the page, or add their own ([`review-themes.md`](review-themes.md)).
 
 Exit codes: `0` — the decisions file is written (whole) · `3` — the human abandoned the review (no
 decisions; their draft is kept beside the decisions path and restores on the next `serve` of the

@@ -5,7 +5,8 @@
 // src/cli.ts
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync as existsSync2, mkdirSync, readFileSync as readFileSync3, writeFileSync as writeFileSync2 } from "node:fs";
+import { existsSync as existsSync2, mkdirSync as mkdirSync2, readdirSync as readdirSync2, readFileSync as readFileSync3, writeFileSync as writeFileSync2 } from "node:fs";
+import { homedir } from "node:os";
 import { dirname as dirname2, join as join3, resolve } from "node:path";
 
 // src/anchor.ts
@@ -1091,7 +1092,7 @@ function gitRef(root, ref) {
 
 // src/server.ts
 import { randomBytes } from "node:crypto";
-import { readFileSync as readFileSync2, renameSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync as readFileSync2, renameSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { basename as basename2, dirname, join as join2 } from "node:path";
 var MAX_BODY = 16 * 1024 * 1024;
@@ -1150,6 +1151,28 @@ async function serve(opts) {
     switch (route) {
       case "GET /api/packet":
         return send(res, 200, { packet: opts.packet, digest: opts.digest, draftPath: opts.draft });
+      case "GET /api/themes":
+        return send(res, 200, {
+          themes: opts.themes ?? [],
+          initial: opts.initialTheme ?? null,
+          dir: opts.themeDir ?? null,
+          prefs: readPrefs(opts.prefsPath)
+        });
+      case "PUT /api/prefs": {
+        const body = await readJson(req);
+        const theme = body.ok ? body.value.theme : undefined;
+        if (typeof theme !== "string" || !/^[a-z0-9-]{1,41}$/.test(theme)) {
+          return send(res, 400, { errors: [{ path: "theme", message: "a theme id" }] });
+        }
+        if (opts.prefsPath) {
+          try {
+            mkdirSync(dirname(opts.prefsPath), { recursive: true });
+            writeFileAtomic(opts.prefsPath, `${JSON.stringify({ ...readPrefs(opts.prefsPath), theme }, null, 2)}
+`);
+          } catch {}
+        }
+        return send(res, 200, { theme });
+      }
       case "GET /api/draft":
         return send(res, 200, readDraft(opts.draft, opts.digest));
       case "PUT /api/draft": {
@@ -1216,6 +1239,16 @@ async function serve(opts) {
     })
   };
 }
+function readPrefs(path) {
+  if (!path)
+    return {};
+  try {
+    const v = JSON.parse(readFileSync2(path, "utf8"));
+    return typeof v.theme === "string" ? { theme: v.theme } : {};
+  } catch {
+    return {};
+  }
+}
 function readDraft(path, digest) {
   let raw;
   try {
@@ -1271,7 +1304,381 @@ function sendHtml(res, html) {
   res.end(html);
 }
 
+// src/themes.ts
+var TOKENS = [
+  "bg",
+  "surface",
+  "sunken",
+  "raised",
+  "ink",
+  "ink-2",
+  "muted",
+  "faint",
+  "line",
+  "line-2",
+  "accent",
+  "accent-ink",
+  "accent-soft",
+  "heading",
+  "heading-2",
+  "xref",
+  "focus",
+  "focus-line",
+  "accept",
+  "amend",
+  "decline",
+  "defer",
+  "revise",
+  "hl-comment",
+  "hl-question",
+  "hl-suggestion",
+  "hl-intent-here",
+  "hl-mismatch",
+  "add-bg",
+  "add-strong",
+  "del-bg",
+  "del-strong",
+  "tk-kw",
+  "tk-str",
+  "tk-com",
+  "tk-num",
+  "tk-fn",
+  "tk-ty",
+  "tk-key",
+  "shadow"
+];
+var SHADOW_DARK = "0 1px 2px rgb(0 0 0 / 0.35), 0 12px 32px rgb(0 0 0 / 0.5)";
+var SHADOW_LIGHT = "0 1px 2px rgb(0 0 0 / 0.05), 0 8px 24px rgb(0 0 0 / 0.1)";
+var THEMES = [
+  {
+    id: "gyokuro-desert",
+    name: "Gyokuro Desert",
+    dark: true,
+    colors: {
+      bg: "#232527",
+      surface: "#1d1f21",
+      sunken: "#17181a",
+      raised: "#2a2c2f",
+      ink: "#d4d4d4",
+      "ink-2": "#bdbdbd",
+      muted: "#a2a4a2",
+      faint: "#7a7c7a",
+      line: "#303336",
+      "line-2": "#3c4046",
+      accent: "#9acd32",
+      "accent-ink": "#1d1f21",
+      "accent-soft": "#2c3a1a",
+      heading: "#9bf99c",
+      "heading-2": "#e5db74",
+      xref: "#87ceeb",
+      focus: "#4a3d14",
+      "focus-line": "#e5db74",
+      accept: "#9bf99c",
+      amend: "#87ceeb",
+      decline: "#ff7b7a",
+      defer: "#e5db74",
+      revise: "#d4a6ff",
+      "hl-comment": "#4d4614",
+      "hl-question": "#173a4f",
+      "hl-suggestion": "#1f4524",
+      "hl-intent-here": "#3e2a57",
+      "hl-mismatch": "#55201f",
+      "add-bg": "#1c3320",
+      "add-strong": "#2f6136",
+      "del-bg": "#3a1c1c",
+      "del-strong": "#723030",
+      "tk-kw": "#e5db74",
+      "tk-str": "#90ee90",
+      "tk-com": "#7ccd7d",
+      "tk-num": "#9acd32",
+      "tk-fn": "#87ceeb",
+      "tk-ty": "#feddaa",
+      "tk-key": "#87ceeb",
+      shadow: SHADOW_DARK
+    }
+  },
+  {
+    id: "gyokuro-desert-og",
+    name: "Gyokuro Desert OG",
+    dark: true,
+    colors: {
+      bg: "#232527",
+      surface: "#1d1f21",
+      sunken: "#17181a",
+      raised: "#2a2c2f",
+      ink: "#d4d4d4",
+      "ink-2": "#bdbdbd",
+      muted: "#a2a4a2",
+      faint: "#7a7c7a",
+      line: "#303336",
+      "line-2": "#3c4046",
+      accent: "#ffa54f",
+      "accent-ink": "#1d1f21",
+      "accent-soft": "#3d2b17",
+      heading: "#ffa54f",
+      "heading-2": "#fa8072",
+      xref: "#87ceeb",
+      focus: "#4a3216",
+      "focus-line": "#ffa54f",
+      accept: "#9bf99c",
+      amend: "#87ceeb",
+      decline: "#ff7b7a",
+      defer: "#ffd27a",
+      revise: "#d4a6ff",
+      "hl-comment": "#4d4614",
+      "hl-question": "#173a4f",
+      "hl-suggestion": "#1f4524",
+      "hl-intent-here": "#3e2a57",
+      "hl-mismatch": "#55201f",
+      "add-bg": "#1c3320",
+      "add-strong": "#2f6136",
+      "del-bg": "#3a1c1c",
+      "del-strong": "#723030",
+      "tk-kw": "#e5db74",
+      "tk-str": "#fa8072",
+      "tk-com": "#7ccd7d",
+      "tk-num": "#ffa54f",
+      "tk-fn": "#87ceeb",
+      "tk-ty": "#feddaa",
+      "tk-key": "#87ceeb",
+      shadow: SHADOW_DARK
+    }
+  },
+  {
+    id: "gyokuro-dark",
+    name: "Gyokuro Dark",
+    dark: true,
+    colors: {
+      bg: "#0f1d16",
+      surface: "#1a2920",
+      sunken: "#13221a",
+      raised: "#213428",
+      ink: "#d3ddd7",
+      "ink-2": "#b3c4b8",
+      muted: "#93ab9a",
+      faint: "#6f8a76",
+      line: "#26392c",
+      "line-2": "#33493a",
+      accent: "#5fe08a",
+      "accent-ink": "#0f1d16",
+      "accent-soft": "#22432e",
+      heading: "#b8f28f",
+      "heading-2": "#9fd3a7",
+      xref: "#ffb86b",
+      focus: "#4a3d14",
+      "focus-line": "#ffd700",
+      accept: "#5fe08a",
+      amend: "#5ce1ff",
+      decline: "#ff6b8b",
+      defer: "#ffd75e",
+      revise: "#d29bff",
+      "hl-comment": "#4a4416",
+      "hl-question": "#173d4d",
+      "hl-suggestion": "#1f4a2a",
+      "hl-intent-here": "#3d2a55",
+      "hl-mismatch": "#55212a",
+      "add-bg": "#1d3a26",
+      "add-strong": "#2f6a40",
+      "del-bg": "#3a1d22",
+      "del-strong": "#71303b",
+      "tk-kw": "#8fbc8f",
+      "tk-str": "#a8d1a3",
+      "tk-com": "#7d9a82",
+      "tk-num": "#b8d4a3",
+      "tk-fn": "#7db87f",
+      "tk-ty": "#9fd3a7",
+      "tk-key": "#9fd3a7",
+      shadow: SHADOW_DARK
+    }
+  },
+  {
+    id: "gyokuro-light",
+    name: "Gyokuro Light",
+    dark: false,
+    colors: {
+      bg: "#e8f2e8",
+      surface: "#f7f9f7",
+      sunken: "#edf4ed",
+      raised: "#ffffff",
+      ink: "#24352a",
+      "ink-2": "#3d5940",
+      muted: "#52695a",
+      faint: "#8aa08e",
+      line: "#d7e5d7",
+      "line-2": "#c3d6c3",
+      accent: "#1a6b1a",
+      "accent-ink": "#ffffff",
+      "accent-soft": "#dcecdc",
+      heading: "#0d5016",
+      "heading-2": "#2d5a30",
+      xref: "#a14400",
+      focus: "#ffe9a8",
+      "focus-line": "#d99a00",
+      accept: "#176c28",
+      amend: "#0b6e99",
+      decline: "#c0263d",
+      defer: "#8f5c00",
+      revise: "#7a2fc4",
+      "hl-comment": "#fff0a0",
+      "hl-question": "#d4eaff",
+      "hl-suggestion": "#d3f2cf",
+      "hl-intent-here": "#eadcff",
+      "hl-mismatch": "#ffd9dc",
+      "add-bg": "#e0f3df",
+      "add-strong": "#b4e2b0",
+      "del-bg": "#fde8ea",
+      "del-strong": "#f5bcc3",
+      "tk-kw": "#1a6b1a",
+      "tk-str": "#0d5016",
+      "tk-com": "#4d6852",
+      "tk-num": "#1a6b1a",
+      "tk-fn": "#2d5a30",
+      "tk-ty": "#0d5016",
+      "tk-key": "#0d5016",
+      shadow: SHADOW_LIGHT
+    }
+  },
+  {
+    id: "neutral-light",
+    name: "Neutral Light",
+    dark: false,
+    colors: {
+      bg: "#f6f6f3",
+      surface: "#ffffff",
+      sunken: "#efefeb",
+      raised: "#ffffff",
+      ink: "#1c1e22",
+      "ink-2": "#3d4149",
+      muted: "#62676f",
+      faint: "#a4a8ae",
+      line: "#e4e3de",
+      "line-2": "#d6d5cf",
+      accent: "#3657c8",
+      "accent-ink": "#ffffff",
+      "accent-soft": "#e9eefc",
+      heading: "#1c1e22",
+      "heading-2": "#3d4149",
+      xref: "#3657c8",
+      focus: "#fde9c6",
+      "focus-line": "#f0b45a",
+      accept: "#1a7046",
+      amend: "#3657c8",
+      decline: "#b4362c",
+      defer: "#8f5c00",
+      revise: "#7442c8",
+      "hl-comment": "#fff0a6",
+      "hl-question": "#d7e9ff",
+      "hl-suggestion": "#d9f3df",
+      "hl-intent-here": "#ece0ff",
+      "hl-mismatch": "#ffdcd8",
+      "add-bg": "#e7f6ea",
+      "add-strong": "#b5e6c0",
+      "del-bg": "#fdecea",
+      "del-strong": "#f6c2bc",
+      "tk-kw": "#8a3fbf",
+      "tk-str": "#1f6e32",
+      "tk-com": "#5b6068",
+      "tk-num": "#a65400",
+      "tk-fn": "#2f5fc4",
+      "tk-ty": "#096a75",
+      "tk-key": "#2f5fc4",
+      shadow: SHADOW_LIGHT
+    }
+  },
+  {
+    id: "neutral-dark",
+    name: "Neutral Dark",
+    dark: true,
+    colors: {
+      bg: "#111215",
+      surface: "#17191d",
+      sunken: "#0d0e10",
+      raised: "#1d2025",
+      ink: "#e6e7ea",
+      "ink-2": "#c5c8ce",
+      muted: "#959aa3",
+      faint: "#5b6068",
+      line: "#262a30",
+      "line-2": "#323740",
+      accent: "#7d9cff",
+      "accent-ink": "#0b1020",
+      "accent-soft": "#1d2640",
+      heading: "#e6e7ea",
+      "heading-2": "#c5c8ce",
+      xref: "#7d9cff",
+      focus: "#4a3516",
+      "focus-line": "#c98b2e",
+      accept: "#4cc38a",
+      amend: "#7d9cff",
+      decline: "#ff7b72",
+      defer: "#e3b341",
+      revise: "#b392f0",
+      "hl-comment": "#4b4415",
+      "hl-question": "#193553",
+      "hl-suggestion": "#173d27",
+      "hl-intent-here": "#35254f",
+      "hl-mismatch": "#4f1f1c",
+      "add-bg": "#10291b",
+      "add-strong": "#1d5a35",
+      "del-bg": "#2f1517",
+      "del-strong": "#6b2a2a",
+      "tk-kw": "#c792ea",
+      "tk-str": "#8fd18f",
+      "tk-com": "#7d838d",
+      "tk-num": "#f2a65a",
+      "tk-fn": "#82aaff",
+      "tk-ty": "#5fd4d0",
+      "tk-key": "#82aaff",
+      shadow: SHADOW_DARK
+    }
+  }
+];
+function resolveTheme(c, builtins = THEMES) {
+  const base = builtins.find((b) => b.id === c.base);
+  if (!base)
+    return null;
+  return { id: c.id, name: c.name, dark: base.dark, colors: { ...base.colors, ...c.colors } };
+}
+var VALUE = /^[#a-zA-Z0-9(),.%\s/+-]{1,120}$/;
+function validateTheme(v) {
+  const errors = [];
+  if (typeof v !== "object" || v === null || Array.isArray(v))
+    return { ok: false, errors: ["must be a JSON object"] };
+  const o = v;
+  if (typeof o.id !== "string" || !/^[a-z0-9][a-z0-9-]{0,40}$/.test(o.id)) {
+    errors.push("id: lower-case letters, digits and dashes");
+  } else if (THEMES.some((t) => t.id === o.id))
+    errors.push(`id: "${o.id}" is a built-in theme`);
+  if (typeof o.name !== "string" || !o.name.trim())
+    errors.push("name: required");
+  if (typeof o.base !== "string" || !THEMES.some((t) => t.id === o.base)) {
+    errors.push(`base: one of ${THEMES.map((t) => t.id).join(", ")}`);
+  }
+  const colors = {};
+  if (o.colors !== undefined) {
+    if (typeof o.colors !== "object" || o.colors === null)
+      errors.push("colors: must be an object");
+    else {
+      for (const [k, val] of Object.entries(o.colors)) {
+        if (!TOKENS.includes(k))
+          errors.push(`colors.${k}: not a theme token`);
+        else if (typeof val !== "string" || !VALUE.test(val))
+          errors.push(`colors.${k}: not a CSS colour value`);
+        else
+          colors[k] = val;
+      }
+    }
+  }
+  if (errors.length)
+    return { ok: false, errors };
+  return {
+    ok: true,
+    theme: { id: o.id, name: o.name, base: o.base, colors }
+  };
+}
+
 // src/cli.ts
+var THEME_DOCS = "https://github.com/crumley/intent-architecture/blob/main/.agents/skills/intent-architecture/references/review-themes.md";
 var TOOL_VERSION = "1.0.0";
 var USAGE = `intent review tool ${TOOL_VERSION} — review a repository's intent and open spec-feedback
 
@@ -1279,10 +1686,14 @@ usage:
   review.mjs scan     --repo <dir> [--out <packet.json>] [--ref <ref>] [--no-questions]
   review.mjs scan     --repo <dir> --base <ref> [--head <ref>] [--out <packet.json>]
   review.mjs validate (--packet <file> | --decisions <file>)
-  review.mjs serve    --packet <file> --out <decisions.json> [--port <n>] [--open]
+  review.mjs serve    --packet <file> --out <decisions.json> [--port <n>] [--open] [--theme <id|file.json>]
   review.mjs locate   --decisions <file> --repo <dir> [--packet <file>]
 
-exit codes: 0 done · 2 usage error or invalid input · 3 review abandoned · 1 unexpected`;
+exit codes: 0 done · 2 usage error or invalid input · 3 review abandoned · 1 unexpected
+
+themes: built-in ${THEMES.map((t) => t.id).join(", ")}; custom themes are JSON files in
+  <config>/themes/ (config: $INTENT_REVIEW_CONFIG, else $XDG_CONFIG_HOME/intent-review, else
+  ~/.config/intent-review) or passed with --theme. Format: ${THEME_DOCS}`;
 
 class UsageError extends Error {
 }
@@ -1297,7 +1708,7 @@ class InputError extends Error {
 var KNOWN = {
   scan: { values: ["repo", "out", "ref", "base", "head"], switches: ["no-questions"] },
   validate: { values: ["packet", "decisions"], switches: [] },
-  serve: { values: ["packet", "out", "port"], switches: ["open"] },
+  serve: { values: ["packet", "out", "port", "theme"], switches: ["open"] },
   locate: { values: ["decisions", "repo", "packet"], switches: [] }
 };
 function parseArgs(argv) {
@@ -1466,7 +1877,7 @@ async function cmdServe(flags, io) {
     if (!Number.isInteger(port) || port < 0 || port > 65535)
       throw new UsageError("--port must be 0–65535");
   }
-  mkdirSync(dirname2(out), { recursive: true });
+  mkdirSync2(dirname2(out), { recursive: true });
   const draft = draftPathFor(out);
   const html = `<!doctype html>
 <html lang="en">
@@ -1480,133 +1891,13 @@ async function cmdServe(flags, io) {
    every rule through the tokens below. */
 
 :root {
-  --bg: #f6f6f3;
-  --surface: #ffffff;
-  --sunken: #efefeb;
-  --raised: #ffffff;
-  --ink: #1c1e22;
-  --ink-2: #3d4149;
-  --muted: #6c717a;
-  --faint: #a4a8ae;
-  --line: #e4e3de;
-  --line-2: #d6d5cf;
-  --accent: #3657c8;
-  --accent-ink: #ffffff;
-  --accent-soft: #e9eefc;
-  --focus: #fde9c6;
-  --focus-line: #f0b45a;
-  --accept: #1e7f4f;
-  --amend: #3657c8;
-  --decline: #b4362c;
-  --defer: #9a6400;
-  --revise: #7442c8;
-  --hl-comment: #fff0a6;
-  --hl-question: #d7e9ff;
-  --hl-suggestion: #d9f3df;
-  --hl-intent-here: #ece0ff;
-  --hl-mismatch: #ffdcd8;
-  --add-bg: #e7f6ea;
-  --add-strong: #b5e6c0;
-  --del-bg: #fdecea;
-  --del-strong: #f6c2bc;
-  --tk-kw: #8a3fbf;
-  --tk-str: #26803a;
-  --tk-com: #8b9098;
-  --tk-num: #b25e00;
-  --tk-fn: #2f5fc4;
-  --tk-ty: #0b7a86;
-  --tk-key: #2f5fc4;
-  --shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 8px 24px rgb(0 0 0 / 0.08);
+  /* Colours come from the active theme (src/themes.ts, injected as CSS); these
+     are the type and shape tokens every theme shares. */
   --sans:
     "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
     sans-serif;
   --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
   --radius: 8px;
-  color-scheme: light;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg: #111215;
-    --surface: #17191d;
-    --sunken: #0d0e10;
-    --raised: #1d2025;
-    --ink: #e6e7ea;
-    --ink-2: #c5c8ce;
-    --muted: #8e939c;
-    --faint: #5b6068;
-    --line: #262a30;
-    --line-2: #323740;
-    --accent: #7d9cff;
-    --accent-ink: #0b1020;
-    --accent-soft: #1d2640;
-    --focus: #4a3516;
-    --focus-line: #c98b2e;
-    --accept: #4cc38a;
-    --amend: #7d9cff;
-    --decline: #ff7b72;
-    --defer: #e3b341;
-    --revise: #b392f0;
-    --hl-comment: #4b4415;
-    --hl-question: #193553;
-    --hl-suggestion: #173d27;
-    --hl-intent-here: #35254f;
-    --hl-mismatch: #4f1f1c;
-    --add-bg: #10291b;
-    --add-strong: #1d5a35;
-    --del-bg: #2f1517;
-    --del-strong: #6b2a2a;
-    --tk-kw: #c792ea;
-    --tk-str: #8fd18f;
-    --tk-com: #6b717b;
-    --tk-num: #f2a65a;
-    --tk-fn: #82aaff;
-    --tk-ty: #5fd4d0;
-    --tk-key: #82aaff;
-    --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 12px 32px rgb(0 0 0 / 0.45);
-    color-scheme: dark;
-  }
-}
-
-:root[data-theme="dark"] {
-  --bg: #111215;
-  --surface: #17191d;
-  --sunken: #0d0e10;
-  --raised: #1d2025;
-  --ink: #e6e7ea;
-  --ink-2: #c5c8ce;
-  --muted: #8e939c;
-  --faint: #5b6068;
-  --line: #262a30;
-  --line-2: #323740;
-  --accent: #7d9cff;
-  --accent-ink: #0b1020;
-  --accent-soft: #1d2640;
-  --focus: #4a3516;
-  --focus-line: #c98b2e;
-  --accept: #4cc38a;
-  --amend: #7d9cff;
-  --decline: #ff7b72;
-  --defer: #e3b341;
-  --revise: #b392f0;
-  --hl-comment: #4b4415;
-  --hl-question: #193553;
-  --hl-suggestion: #173d27;
-  --hl-intent-here: #35254f;
-  --hl-mismatch: #4f1f1c;
-  --add-bg: #10291b;
-  --add-strong: #1d5a35;
-  --del-bg: #2f1517;
-  --del-strong: #6b2a2a;
-  --tk-kw: #c792ea;
-  --tk-str: #8fd18f;
-  --tk-com: #6b717b;
-  --tk-num: #f2a65a;
-  --tk-fn: #82aaff;
-  --tk-ty: #5fd4d0;
-  --tk-key: #82aaff;
-  --shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 12px 32px rgb(0 0 0 / 0.45);
-  color-scheme: dark;
 }
 
 /* ---------------------------------------------------------------- base */
@@ -2285,6 +2576,7 @@ details[open] > summary > .ic-chev,
   margin-bottom: 10px;
 }
 .item-title {
+  color: var(--heading);
   font-size: 25px;
   line-height: 1.25;
   margin-bottom: 18px;
@@ -2496,7 +2788,7 @@ details.fold > table {
 .vbtn.on {
   background: var(--vc);
   border-color: var(--vc);
-  color: #fff;
+  color: var(--surface);
 }
 .vbtn.on kbd {
   background: transparent;
@@ -3392,6 +3684,416 @@ td.st-adjudicated {
   max-height: 520px;
   overflow: auto;
 }
+
+/* ---------------------------------------------------------------- colour in reading surfaces */
+
+.prose .b-h1,
+.prose .b-h2,
+.page h1 {
+  color: var(--heading);
+}
+.prose .b-h3,
+.prose .b-h4,
+.prose .b-h5,
+.prose .b-h6 {
+  color: var(--heading-2);
+}
+.prose .code {
+  color: var(--tk-ty);
+}
+.prose .b {
+  color: var(--ink);
+}
+.codeview .ln.h {
+  color: var(--heading);
+}
+.xref {
+  color: var(--xref);
+  text-decoration: underline dotted;
+  text-decoration-color: color-mix(in srgb, var(--xref) 55%, transparent);
+  text-underline-offset: 3px;
+  cursor: pointer;
+  border-radius: 3px;
+}
+.xref:hover,
+.xref:focus-visible {
+  background: color-mix(in srgb, var(--xref) 14%, transparent);
+  text-decoration-style: solid;
+}
+.prose .a.xref {
+  color: var(--xref);
+}
+
+/* ---------------------------------------------------------------- tooltips + peeks */
+
+.tip {
+  position: fixed;
+  z-index: 40;
+  max-width: 360px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--ink);
+  color: var(--surface);
+  font-size: 13px;
+  line-height: 1.5;
+  box-shadow: var(--shadow);
+  pointer-events: none;
+}
+.card-peek {
+  width: 380px;
+  padding: 12px 14px;
+}
+.cp-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--xref);
+  font-size: 12.5px;
+}
+.cp-title {
+  font-weight: 650;
+  color: var(--heading);
+  margin: 4px 0;
+  line-height: 1.35;
+}
+.cp-sum {
+  font-size: 13.5px;
+  color: var(--ink-2);
+  line-height: 1.5;
+}
+.cp-hint {
+  margin-top: 8px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
+/* ---------------------------------------------------------------- theme picker */
+
+.swatch {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid var(--line-2);
+  margin-right: 6px;
+  flex: none;
+}
+.swatch.big {
+  width: 22px;
+  height: 22px;
+  margin: 0;
+}
+.picker {
+  position: fixed;
+  top: 54px;
+  right: 16px;
+  z-index: 30;
+  width: 320px;
+  max-width: calc(100vw - 32px);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.picker .eyebrow {
+  margin: 6px 6px 2px;
+}
+.theme-opt {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px;
+  border-radius: 8px;
+}
+.theme-opt:hover {
+  background: var(--sunken);
+}
+.theme-opt.on {
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.theme-name {
+  flex: 1;
+  font-weight: 550;
+}
+.picker-foot {
+  border-top: 1px solid var(--line);
+  margin-top: 6px;
+  padding: 10px 6px 2px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.picker-foot a {
+  color: var(--xref);
+}
+
+/* ---------------------------------------------------------------- home */
+
+.home-title {
+  font-size: 30px;
+  line-height: 1.2;
+  margin: 6px 0 12px;
+  text-wrap: balance;
+}
+.asks {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ask {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--surface);
+  transition:
+    border-color 0.12s,
+    background 0.12s;
+}
+.ask:hover {
+  background: var(--accent-soft);
+}
+.ask-n {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--heading);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.ask-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.cta {
+  margin: 22px 0 6px;
+  gap: 16px;
+}
+.steps {
+  padding-left: 22px;
+  max-width: 70ch;
+}
+.steps li {
+  margin-bottom: 10px;
+  line-height: 1.6;
+}
+.steps li::marker {
+  color: var(--heading);
+  font-weight: 700;
+}
+.cards3 {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px;
+}
+.view-card {
+  text-align: left;
+}
+.view-card:hover {
+  border-color: var(--accent);
+}
+.view-card p {
+  margin: 6px 0 0;
+}
+.defs {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 10px 18px;
+  margin: 0;
+  max-width: 76ch;
+}
+.defs dt {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.defs dd {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 14.5px;
+}
+.nav-home {
+  display: block;
+  width: 100%;
+  padding: 6px 10px 12px;
+  color: var(--muted);
+}
+.nav-home:hover {
+  color: var(--xref);
+}
+.supporting {
+  margin-top: 28px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--line-2);
+}
+.supporting > .eyebrow {
+  margin-bottom: 8px;
+}
+
+/* ---------------------------------------------------------------- the ruling dock */
+
+.ruling {
+  flex: none; /* a flex item with overflow would otherwise shrink to nothing */
+  border-top: 2px solid var(--accent);
+  background: color-mix(in srgb, var(--raised) 94%, transparent);
+  box-shadow: 0 -10px 28px rgb(0 0 0 / 0.12);
+  padding: 10px 40px 14px;
+  max-height: 58vh;
+  overflow: auto;
+}
+.ruling.ruled {
+  border-top-color: var(--vc);
+}
+.ruling > details.fold {
+  margin: 0 auto 6px;
+}
+.ruling > details.fold > summary {
+  margin-bottom: 4px;
+}
+.conseqs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.conseq {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+.conseq.c-yes {
+  border-left: 3px solid var(--accept);
+}
+.conseq.c-no {
+  border-left: 3px solid var(--decline);
+}
+.conseq.picked {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--vc) 40%, transparent);
+}
+.conseq-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.conseq.full .conseq-text {
+  display: block;
+}
+.ruling-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 6px auto 8px;
+}
+.ruling-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--heading);
+}
+.verdicts {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+.verdicts .vbtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 10px 8px;
+  font-size: 14.5px;
+  font-weight: 650;
+  border: 1.5px solid color-mix(in srgb, var(--vc) 55%, var(--line-2));
+  color: var(--vc);
+  background: color-mix(in srgb, var(--vc) 7%, var(--surface));
+  border-radius: 9px;
+}
+.verdicts .vbtn:hover {
+  background: color-mix(in srgb, var(--vc) 16%, var(--surface));
+  border-color: var(--vc);
+}
+.verdicts .vbtn.on {
+  background: var(--vc);
+  border-color: var(--vc);
+  color: var(--surface);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--vc) 28%, transparent);
+}
+.verdicts .vbtn.rec:not(.on) {
+  border-style: dashed;
+}
+.vb-mark {
+  width: 1em;
+  text-align: center;
+}
+.verdicts .vbtn.on kbd {
+  background: transparent;
+  color: inherit;
+  border-color: color-mix(in srgb, var(--surface) 50%, transparent);
+}
+.ruling > * {
+  max-width: 760px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+@media (max-width: 900px) {
+  .ruling {
+    padding: 8px 16px 12px;
+  }
+  .verdicts {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .conseqs {
+    grid-template-columns: 1fr;
+  }
+  .ask {
+    grid-template-columns: 44px minmax(0, 1fr);
+  }
+  .ask-done {
+    display: none;
+  }
+}
+
+.wdiff .mk {
+  color: var(--faint);
+}
+.wdiff .b {
+  font-weight: 650;
+}
+.wdiff .i {
+  font-style: italic;
+}
+.wdiff .code {
+  font-family: var(--mono);
+  font-size: 0.88em;
+  color: var(--tk-ty);
+}
+.picker-foot .mono {
+  overflow-wrap: anywhere;
+}
+@media (max-height: 860px) {
+  .conseq-text {
+    -webkit-line-clamp: 2;
+  }
+  .verdicts .vbtn {
+    padding: 7px 6px;
+  }
+}
 </style>
 </head>
 <body>
@@ -3579,6 +4281,342 @@ td.st-adjudicated {
     defer: null,
     revise: "request"
   };
+
+  // src/themes.ts
+  var TOKENS = [
+    "bg",
+    "surface",
+    "sunken",
+    "raised",
+    "ink",
+    "ink-2",
+    "muted",
+    "faint",
+    "line",
+    "line-2",
+    "accent",
+    "accent-ink",
+    "accent-soft",
+    "heading",
+    "heading-2",
+    "xref",
+    "focus",
+    "focus-line",
+    "accept",
+    "amend",
+    "decline",
+    "defer",
+    "revise",
+    "hl-comment",
+    "hl-question",
+    "hl-suggestion",
+    "hl-intent-here",
+    "hl-mismatch",
+    "add-bg",
+    "add-strong",
+    "del-bg",
+    "del-strong",
+    "tk-kw",
+    "tk-str",
+    "tk-com",
+    "tk-num",
+    "tk-fn",
+    "tk-ty",
+    "tk-key",
+    "shadow"
+  ];
+  var SHADOW_DARK = "0 1px 2px rgb(0 0 0 / 0.35), 0 12px 32px rgb(0 0 0 / 0.5)";
+  var SHADOW_LIGHT = "0 1px 2px rgb(0 0 0 / 0.05), 0 8px 24px rgb(0 0 0 / 0.1)";
+  var THEMES = [
+    {
+      id: "gyokuro-desert",
+      name: "Gyokuro Desert",
+      dark: true,
+      colors: {
+        bg: "#232527",
+        surface: "#1d1f21",
+        sunken: "#17181a",
+        raised: "#2a2c2f",
+        ink: "#d4d4d4",
+        "ink-2": "#bdbdbd",
+        muted: "#a2a4a2",
+        faint: "#7a7c7a",
+        line: "#303336",
+        "line-2": "#3c4046",
+        accent: "#9acd32",
+        "accent-ink": "#1d1f21",
+        "accent-soft": "#2c3a1a",
+        heading: "#9bf99c",
+        "heading-2": "#e5db74",
+        xref: "#87ceeb",
+        focus: "#4a3d14",
+        "focus-line": "#e5db74",
+        accept: "#9bf99c",
+        amend: "#87ceeb",
+        decline: "#ff7b7a",
+        defer: "#e5db74",
+        revise: "#d4a6ff",
+        "hl-comment": "#4d4614",
+        "hl-question": "#173a4f",
+        "hl-suggestion": "#1f4524",
+        "hl-intent-here": "#3e2a57",
+        "hl-mismatch": "#55201f",
+        "add-bg": "#1c3320",
+        "add-strong": "#2f6136",
+        "del-bg": "#3a1c1c",
+        "del-strong": "#723030",
+        "tk-kw": "#e5db74",
+        "tk-str": "#90ee90",
+        "tk-com": "#7ccd7d",
+        "tk-num": "#9acd32",
+        "tk-fn": "#87ceeb",
+        "tk-ty": "#feddaa",
+        "tk-key": "#87ceeb",
+        shadow: SHADOW_DARK
+      }
+    },
+    {
+      id: "gyokuro-desert-og",
+      name: "Gyokuro Desert OG",
+      dark: true,
+      colors: {
+        bg: "#232527",
+        surface: "#1d1f21",
+        sunken: "#17181a",
+        raised: "#2a2c2f",
+        ink: "#d4d4d4",
+        "ink-2": "#bdbdbd",
+        muted: "#a2a4a2",
+        faint: "#7a7c7a",
+        line: "#303336",
+        "line-2": "#3c4046",
+        accent: "#ffa54f",
+        "accent-ink": "#1d1f21",
+        "accent-soft": "#3d2b17",
+        heading: "#ffa54f",
+        "heading-2": "#fa8072",
+        xref: "#87ceeb",
+        focus: "#4a3216",
+        "focus-line": "#ffa54f",
+        accept: "#9bf99c",
+        amend: "#87ceeb",
+        decline: "#ff7b7a",
+        defer: "#ffd27a",
+        revise: "#d4a6ff",
+        "hl-comment": "#4d4614",
+        "hl-question": "#173a4f",
+        "hl-suggestion": "#1f4524",
+        "hl-intent-here": "#3e2a57",
+        "hl-mismatch": "#55201f",
+        "add-bg": "#1c3320",
+        "add-strong": "#2f6136",
+        "del-bg": "#3a1c1c",
+        "del-strong": "#723030",
+        "tk-kw": "#e5db74",
+        "tk-str": "#fa8072",
+        "tk-com": "#7ccd7d",
+        "tk-num": "#ffa54f",
+        "tk-fn": "#87ceeb",
+        "tk-ty": "#feddaa",
+        "tk-key": "#87ceeb",
+        shadow: SHADOW_DARK
+      }
+    },
+    {
+      id: "gyokuro-dark",
+      name: "Gyokuro Dark",
+      dark: true,
+      colors: {
+        bg: "#0f1d16",
+        surface: "#1a2920",
+        sunken: "#13221a",
+        raised: "#213428",
+        ink: "#d3ddd7",
+        "ink-2": "#b3c4b8",
+        muted: "#93ab9a",
+        faint: "#6f8a76",
+        line: "#26392c",
+        "line-2": "#33493a",
+        accent: "#5fe08a",
+        "accent-ink": "#0f1d16",
+        "accent-soft": "#22432e",
+        heading: "#b8f28f",
+        "heading-2": "#9fd3a7",
+        xref: "#ffb86b",
+        focus: "#4a3d14",
+        "focus-line": "#ffd700",
+        accept: "#5fe08a",
+        amend: "#5ce1ff",
+        decline: "#ff6b8b",
+        defer: "#ffd75e",
+        revise: "#d29bff",
+        "hl-comment": "#4a4416",
+        "hl-question": "#173d4d",
+        "hl-suggestion": "#1f4a2a",
+        "hl-intent-here": "#3d2a55",
+        "hl-mismatch": "#55212a",
+        "add-bg": "#1d3a26",
+        "add-strong": "#2f6a40",
+        "del-bg": "#3a1d22",
+        "del-strong": "#71303b",
+        "tk-kw": "#8fbc8f",
+        "tk-str": "#a8d1a3",
+        "tk-com": "#7d9a82",
+        "tk-num": "#b8d4a3",
+        "tk-fn": "#7db87f",
+        "tk-ty": "#9fd3a7",
+        "tk-key": "#9fd3a7",
+        shadow: SHADOW_DARK
+      }
+    },
+    {
+      id: "gyokuro-light",
+      name: "Gyokuro Light",
+      dark: false,
+      colors: {
+        bg: "#e8f2e8",
+        surface: "#f7f9f7",
+        sunken: "#edf4ed",
+        raised: "#ffffff",
+        ink: "#24352a",
+        "ink-2": "#3d5940",
+        muted: "#52695a",
+        faint: "#8aa08e",
+        line: "#d7e5d7",
+        "line-2": "#c3d6c3",
+        accent: "#1a6b1a",
+        "accent-ink": "#ffffff",
+        "accent-soft": "#dcecdc",
+        heading: "#0d5016",
+        "heading-2": "#2d5a30",
+        xref: "#a14400",
+        focus: "#ffe9a8",
+        "focus-line": "#d99a00",
+        accept: "#176c28",
+        amend: "#0b6e99",
+        decline: "#c0263d",
+        defer: "#8f5c00",
+        revise: "#7a2fc4",
+        "hl-comment": "#fff0a0",
+        "hl-question": "#d4eaff",
+        "hl-suggestion": "#d3f2cf",
+        "hl-intent-here": "#eadcff",
+        "hl-mismatch": "#ffd9dc",
+        "add-bg": "#e0f3df",
+        "add-strong": "#b4e2b0",
+        "del-bg": "#fde8ea",
+        "del-strong": "#f5bcc3",
+        "tk-kw": "#1a6b1a",
+        "tk-str": "#0d5016",
+        "tk-com": "#4d6852",
+        "tk-num": "#1a6b1a",
+        "tk-fn": "#2d5a30",
+        "tk-ty": "#0d5016",
+        "tk-key": "#0d5016",
+        shadow: SHADOW_LIGHT
+      }
+    },
+    {
+      id: "neutral-light",
+      name: "Neutral Light",
+      dark: false,
+      colors: {
+        bg: "#f6f6f3",
+        surface: "#ffffff",
+        sunken: "#efefeb",
+        raised: "#ffffff",
+        ink: "#1c1e22",
+        "ink-2": "#3d4149",
+        muted: "#62676f",
+        faint: "#a4a8ae",
+        line: "#e4e3de",
+        "line-2": "#d6d5cf",
+        accent: "#3657c8",
+        "accent-ink": "#ffffff",
+        "accent-soft": "#e9eefc",
+        heading: "#1c1e22",
+        "heading-2": "#3d4149",
+        xref: "#3657c8",
+        focus: "#fde9c6",
+        "focus-line": "#f0b45a",
+        accept: "#1a7046",
+        amend: "#3657c8",
+        decline: "#b4362c",
+        defer: "#8f5c00",
+        revise: "#7442c8",
+        "hl-comment": "#fff0a6",
+        "hl-question": "#d7e9ff",
+        "hl-suggestion": "#d9f3df",
+        "hl-intent-here": "#ece0ff",
+        "hl-mismatch": "#ffdcd8",
+        "add-bg": "#e7f6ea",
+        "add-strong": "#b5e6c0",
+        "del-bg": "#fdecea",
+        "del-strong": "#f6c2bc",
+        "tk-kw": "#8a3fbf",
+        "tk-str": "#1f6e32",
+        "tk-com": "#5b6068",
+        "tk-num": "#a65400",
+        "tk-fn": "#2f5fc4",
+        "tk-ty": "#096a75",
+        "tk-key": "#2f5fc4",
+        shadow: SHADOW_LIGHT
+      }
+    },
+    {
+      id: "neutral-dark",
+      name: "Neutral Dark",
+      dark: true,
+      colors: {
+        bg: "#111215",
+        surface: "#17191d",
+        sunken: "#0d0e10",
+        raised: "#1d2025",
+        ink: "#e6e7ea",
+        "ink-2": "#c5c8ce",
+        muted: "#959aa3",
+        faint: "#5b6068",
+        line: "#262a30",
+        "line-2": "#323740",
+        accent: "#7d9cff",
+        "accent-ink": "#0b1020",
+        "accent-soft": "#1d2640",
+        heading: "#e6e7ea",
+        "heading-2": "#c5c8ce",
+        xref: "#7d9cff",
+        focus: "#4a3516",
+        "focus-line": "#c98b2e",
+        accept: "#4cc38a",
+        amend: "#7d9cff",
+        decline: "#ff7b72",
+        defer: "#e3b341",
+        revise: "#b392f0",
+        "hl-comment": "#4b4415",
+        "hl-question": "#193553",
+        "hl-suggestion": "#173d27",
+        "hl-intent-here": "#35254f",
+        "hl-mismatch": "#4f1f1c",
+        "add-bg": "#10291b",
+        "add-strong": "#1d5a35",
+        "del-bg": "#2f1517",
+        "del-strong": "#6b2a2a",
+        "tk-kw": "#c792ea",
+        "tk-str": "#8fd18f",
+        "tk-com": "#7d838d",
+        "tk-num": "#f2a65a",
+        "tk-fn": "#82aaff",
+        "tk-ty": "#5fd4d0",
+        "tk-key": "#82aaff",
+        shadow: SHADOW_DARK
+      }
+    }
+  ];
+  var DEFAULT_DARK = "gyokuro-desert";
+  var DEFAULT_LIGHT = "gyokuro-light";
+  function themeCss(t) {
+    const vars = TOKENS.map((k) => \`--\${k}:\${t.colors[k]};\`).join("");
+    return \`:root[data-theme="\${t.id}"]{\${vars}color-scheme:\${t.dark ? "dark" : "light"};}\`;
+  }
 
   // src/ui/highlight.ts
   var EXT = {
@@ -3825,7 +4863,8 @@ td.st-adjudicated {
         end: e,
         text: text.slice(s, e),
         cls: [...new Set(cover.flatMap((r) => r.cls.split(" ").filter(Boolean)))],
-        ids: [...new Set(cover.flatMap((r) => r.id === undefined ? [] : [r.id]))]
+        ids: [...new Set(cover.flatMap((r) => r.id === undefined ? [] : [r.id]))],
+        links: [...new Set(cover.flatMap((r) => r.link === undefined ? [] : [r.link]))]
       });
     }
     return out;
@@ -3861,6 +4900,8 @@ td.st-adjudicated {
           const r = { start: Math.max(m.start, start), end: Math.min(m.end, end), cls: m.cls };
           if (m.id !== undefined)
             r.id = m.id;
+          if (m.link !== undefined)
+            r.link = m.link;
           all.push(r);
         }
       }
@@ -3956,11 +4997,114 @@ td.st-adjudicated {
     return null;
   }
 
+  // src/ui/xref.ts
+  function buildIndex(paths, sfIds, preferred = []) {
+    const files = new Set(paths);
+    const entries = new Map;
+    const adrs = new Map;
+    const basenames = new Map;
+    for (const p of paths) {
+      const e = /^design\\/((\\d{4})-[^/]+)\\//.exec(p);
+      if (e && !entries.has(e[2]))
+        entries.set(e[2], \`design/\${e[1]}\`);
+      const a = /^design\\/decisions\\/(\\d{4})-[^/]+\\.md$/.exec(p);
+      if (a)
+        adrs.set(a[1], p);
+      const b = p.split("/").pop();
+      basenames.set(b, [...basenames.get(b) ?? [], p]);
+    }
+    return { files, entries, adrs, sfs: new Set(sfIds), basenames, preferred };
+  }
+  function entryOf(pathOrId) {
+    return /(?:^|\\/)(\\d{4}-[a-z0-9-]+)(?:\\/|$)/.exec(pathOrId)?.[1];
+  }
+  function normalize(dir, target) {
+    const parts = (target.startsWith("/") || !dir ? [] : dir.split("/")).filter(Boolean);
+    for (const seg of target.replace(/^\\//, "").split("/")) {
+      if (seg === "..")
+        parts.pop();
+      else if (seg !== "." && seg !== "")
+        parts.push(seg);
+    }
+    return parts.join("/");
+  }
+  function resolvePath(idx, ctx, raw) {
+    const target = raw.split("#")[0]?.replace(/[.,;:)]+$/, "") ?? "";
+    if (!target || /^[a-z]+:/i.test(target))
+      return null;
+    for (const cand of [normalize(ctx.dir, target), normalize(undefined, target)]) {
+      if (idx.files.has(cand))
+        return cand;
+      if (idx.files.has(\`\${cand}/README.md\`))
+        return \`\${cand}/README.md\`;
+    }
+    return null;
+  }
+  function findRefs(text, idx, ctx = {}) {
+    const out = [];
+    const taken = [];
+    const free = (s, e) => !out.some((r) => s < r.end && e > r.start) && !taken.some(([a, b]) => s < b && e > a);
+    const add = (s, e, link) => {
+      if (e > s && free(s, e))
+        out.push({ start: s, end: e, cls: "xref", link });
+    };
+    for (const m of text.matchAll(/\\[([^\\]\\n]+)\\]\\(([^)\\s]+)\\)/g)) {
+      const path = resolvePath(idx, ctx, m[2]);
+      const at = m.index;
+      const textEnd = at + 1 + m[1].length;
+      if (path)
+        add(at + 1, textEnd, \`file:\${path}\`);
+      taken.push([textEnd, at + m[0].length]);
+    }
+    for (const m of text.matchAll(/\\b(?:(\\d{4})(?:-[a-z0-9-]+)?(?:['’]s)?[ /])?SF-(\\d{3})\\b/g)) {
+      const num = m[1];
+      const sf = \`SF-\${m[2]}\`;
+      let entryDir = num ? idx.entries.get(num)?.replace(/^design\\//, "") : ctx.entry;
+      if (!entryDir && !num) {
+        const hits = idx.preferred.filter((p) => p.endsWith(\`/\${sf}\`));
+        if (hits.length === 1)
+          entryDir = hits[0].slice(0, -sf.length - 1);
+      }
+      if (!entryDir)
+        continue;
+      const id = \`\${entryDir}/\${sf}\`;
+      if (idx.sfs.has(id))
+        add(m.index, m.index + m[0].length, \`sf:\${id}\`);
+    }
+    for (const m of text.matchAll(/\\bADR[ -]?(\\d{4})\\b/g)) {
+      if (idx.adrs.has(m[1]))
+        add(m.index, m.index + m[0].length, \`adr:\${m[1]}\`);
+    }
+    for (const m of text.matchAll(/(?<![\\w/.-])((?:\\.\\.?\\/)*(?:intent|design|src|test|tools|template)\\/[\\w./-]*[\\w/])/g)) {
+      const path = resolvePath(idx, ctx, m[1]);
+      if (path)
+        add(m.index, m.index + m[1].length, \`file:\${path}\`);
+    }
+    for (const m of text.matchAll(/(?<![\\w/.-])((?:\\.\\.?\\/)*[\\w.-]+\\.md)\\b/g)) {
+      const raw = m[1];
+      const path = resolvePath(idx, ctx, raw) ?? uniqueBase(idx, raw);
+      if (path)
+        add(m.index, m.index + raw.length, \`file:\${path}\`);
+    }
+    for (const m of text.matchAll(/(?<![\\w/.-])(0\\d{3})(?![\\w-])/g)) {
+      const n = m[1];
+      const link = idx.entries.has(n) ? \`entry:\${n}\` : idx.adrs.has(n) ? \`adr:\${n}\` : null;
+      if (link)
+        add(m.index, m.index + n.length, link);
+    }
+    return out.sort((a, b) => a.start - b.start);
+  }
+  function uniqueBase(idx, raw) {
+    const hits = idx.basenames.get(raw.split("/").pop()) ?? [];
+    return hits.length === 1 ? hits[0] : null;
+  }
+
   // src/ui/main.ts
   var token = new URLSearchParams(location.search).get("token") ?? "";
   var root = document.getElementById("app");
   var S;
   var FILES = new Map;
+  var IDX = buildIndex([], []);
   function h(tag, attrs = {}, ...children) {
     const el = document.createElement(tag);
     for (const [k, v] of Object.entries(attrs)) {
@@ -3970,7 +5114,10 @@ td.st-adjudicated {
         el.addEventListener(k.slice(2), v);
       } else if (k === "class")
         el.className = String(v);
-      else if (k === "value")
+      else if (k === "tip") {
+        el.dataset.tip = String(v);
+        el.setAttribute("aria-description", String(v));
+      } else if (k === "value")
         el.value = String(v);
       else
         el.setAttribute(k, v === true ? "" : String(v));
@@ -4055,6 +5202,14 @@ td.st-adjudicated {
     const m = /^(\\d{4})-[^/]*\\/(SF-\\d+)$/.exec(id);
     if (m)
       return \`\${m[1]} \${m[2]}\`;
+    const adr = /(?:^|\\/)decisions\\/(\\d{4})-/.exec(id);
+    if (adr)
+      return \`ADR \${adr[1]}\`;
+    const entry = /^design\\/(\\d{4})-[^/]+$/.exec(id);
+    if (entry)
+      return \`entry \${entry[1]}\`;
+    if (id.startsWith("intent-change/"))
+      return id.split("/").pop();
     return id.length > 40 ? \`…\${id.slice(-38)}\` : id;
   }
   function setVerdict(id, verdict) {
@@ -4136,20 +5291,61 @@ td.st-adjudicated {
   }
   function spanFor(s) {
     const span = h("span", { "data-o": s.start, class: s.cls.join(" ") || undefined }, s.text);
+    const link = s.links[0];
+    if (link) {
+      span.dataset.link = link;
+      span.tabIndex = 0;
+      span.addEventListener("click", (e) => {
+        if (window.getSelection()?.isCollapsed) {
+          e.stopPropagation();
+          followLink(link);
+        }
+      });
+      span.addEventListener("keydown", (e) => {
+        if (e.key === "Enter")
+          followLink(link);
+      });
+      hoverPeek(span, () => linkCard(link));
+    }
     if (s.ids.length) {
       span.dataset.ann = s.ids.join(" ");
       span.title = s.ids.map((id) => S.review.annotations.find((a) => a.id === id)?.comment ?? "").filter(Boolean).join(\`
 —
 \`);
-      span.addEventListener("click", (e) => {
-        if (window.getSelection()?.isCollapsed) {
-          e.stopPropagation();
-          editAnnotation(s.ids[0]);
-        }
-      });
+      if (!link) {
+        span.addEventListener("click", (e) => {
+          if (window.getSelection()?.isCollapsed) {
+            e.stopPropagation();
+            editAnnotation(s.ids[0]);
+          }
+        });
+      }
     }
     return span;
   }
+  function viewMarks(text, o) {
+    return [
+      ...o.target ? marksFor(o.target, text) : [],
+      ...o.extra ?? [],
+      ...o.ctx ? findRefs(text, IDX, o.ctx) : []
+    ];
+  }
+  var fileCtx = (path) => {
+    const c = { dir: path.split("/").slice(0, -1).join("/") };
+    const e = entryOf(path);
+    if (e)
+      c.entry = e;
+    return c;
+  };
+  var itemCtx = (it) => {
+    if (!it)
+      return {};
+    const c = fileCtx(it.source.path);
+    const e = entryOf(it.id) ?? c.entry;
+    if (e)
+      c.entry = e;
+    return c;
+  };
   function annotatable(el, t) {
     if (!t)
       return el;
@@ -4164,7 +5360,7 @@ td.st-adjudicated {
     return el;
   }
   function proseView(text, o = {}) {
-    const marks = [...o.target ? marksFor(o.target, text) : [], ...o.extra ?? []];
+    const marks = viewMarks(text, o);
     const lines = renderLines(text, "markdown", marks);
     const view = h("div", { class: \`prose\${o.compact ? " compact" : ""}\` });
     for (const b of blocks(lines, text)) {
@@ -4193,7 +5389,7 @@ td.st-adjudicated {
     return annotatable(view, o.target);
   }
   function codeView(text, lang, o = {}) {
-    const marks = [...o.target ? marksFor(o.target, text) : [], ...o.extra ?? []];
+    const marks = viewMarks(text, o);
     const lines = renderLines(text, lang, marks);
     const view = h("div", { class: \`codeview lang-\${lang}\${o.compact ? " compact" : ""}\` });
     for (const line of lines) {
@@ -4215,9 +5411,10 @@ td.st-adjudicated {
     const text = fileText(path) ?? "";
     const lang = langOf(path);
     const target = { kind: "file", path };
+    const ctx = fileCtx(path);
     if (lang === "markdown" && !S.raw)
-      return proseView(text, { ...o, target });
-    return codeView(text, lang, { ...o, target });
+      return proseView(text, { ...o, target, ctx });
+    return codeView(text, lang, { ...o, target, ctx });
   }
   function excerpt(r) {
     const text = fileText(r.path);
@@ -4230,23 +5427,46 @@ td.st-adjudicated {
     const focus = { ...range, cls: "focus" };
     const lang = langOf(r.path);
     if (lang === "markdown") {
-      return h("div", { class: "excerpt" }, proseView(text, { target, extra: [focus], window: range, compact: true }));
+      return h("div", { class: "excerpt" }, proseView(text, {
+        target,
+        extra: [focus],
+        window: range,
+        compact: true,
+        ctx: fileCtx(r.path)
+      }));
     }
     const a = lineOf(text, range.start);
     const b = lineOf(text, range.end);
     return h("div", { class: "excerpt" }, codeView(text, lang, {
       target,
+      ctx: fileCtx(r.path),
       extra: [focus],
       lines: { start: Math.max(1, a - 2), end: b + 2 },
       compact: true
     }));
   }
   function itemText(it, key, text) {
-    return proseView(text, { target: { kind: "item", item: it.id, section: key }, compact: true });
+    return proseView(text, {
+      target: { kind: "item", item: it.id, section: key },
+      compact: true,
+      ctx: itemCtx(it)
+    });
   }
-  var plainProse = (text) => proseView(text, { compact: true });
+  var plainProse = (text, ctx = itemCtx(currentItem())) => proseView(text, { compact: true, ctx });
+  function linked(text, ctx = itemCtx(currentItem())) {
+    const refs = findRefs(text, IDX, ctx);
+    return h("span", {}, segment(text, 0, text.length, refs).map((sg) => spanFor(sg)));
+  }
   function wordDiff(before, after) {
-    return h("div", { class: "wdiff" }, diffWords(before, after).map((d) => h("span", { class: \`w-\${d.op}\` }, d.text)));
+    const parts = diffWords(before, after);
+    const ops = [];
+    let text = "";
+    for (const d of parts) {
+      ops.push({ start: text.length, end: text.length + d.text.length, cls: \`w-\${d.op}\` });
+      text += d.text;
+    }
+    const segs = segment(text, 0, text.length, [...ops, ...inlineRanges(text)]);
+    return h("div", { class: "wdiff" }, segs.map((sg) => h("span", { class: sg.cls.join(" ") || undefined }, sg.text)));
   }
   function patchView(change) {
     const lang = langOf(change.path);
@@ -4382,6 +5602,34 @@ td.st-adjudicated {
     "intent-here": "The intent this expresses is… (the agent adds it to intent/, or strengthens the passage that owns it)",
     mismatch: "How this diverges from the intent… (the agent reconciles the code or the intent)"
   };
+  var ANN_TIP = {
+    comment: "Comment — a remark for the agent to weigh. It may act on it or simply take note; no reply is owed. Use a question when you want an answer.",
+    question: "Question — something you want answered. The agent replies (in its report, or as a new item next pass) before acting on it.",
+    suggestion: "Suggest edit — replace the selected text with your own wording. The agent applies it through the normal review path.",
+    "intent-here": "Intent here — say, in your words, what this passage is for: the purpose behind it that is written nowhere else (often code). The agent records it in intent/, or strengthens the slice that should already say it.",
+    mismatch: "Mismatch — this does not do what the intent says. The agent works out whether the code or the intent should change, and brings that choice back to you."
+  };
+  var VERDICT_TIP = {
+    accept: "Accept — the proposal is right. The agent makes the intent edit as proposed, in its own change for review.",
+    amend: "Amend — right direction, your words. You write the wording; the agent makes the intent edit with it.",
+    decline: "Decline — no change to the intent. Give a one-line why; it is recorded on the item as its disposition.",
+    defer: "Defer — not now. Optionally record your ruling to apply later; otherwise the item simply stays open.",
+    revise: "Revise — send it back. The agent reworks the proposal or analysis as you ask and shows it again next pass."
+  };
+  var CHANGE_TIP = {
+    accept: "Approve — this change is right as it stands.",
+    amend: "Amend — keep the change, in your wording. The agent applies it on the branch.",
+    decline: "Reject — this change should not go in. Say why; the agent reverts or reworks it on the branch.",
+    defer: "Defer — no ruling on this change yet.",
+    revise: "Revise — the agent reworks this change as you ask and brings it back for another look."
+  };
+  var VIEW_TIP = {
+    home: "Home — what this review is, what you are asked to do, how to work through it, and the keys.",
+    queue: "Queue — the items needing your ruling, one at a time, with the intent they touch beside them.",
+    files: "Files — every file in the snapshot (intent, design, code), to read and to note anywhere.",
+    dashboard: "Dashboard — every spec-feedback item in the repository, by status and by the intent slice it questions.",
+    submit: "Review & submit — look over every ruling and note from this session, then hand them back to the agent."
+  };
   var editor = null;
   function openEditor(kind) {
     const p = selectionTarget();
@@ -4503,6 +5751,7 @@ td.st-adjudicated {
       }
     }, h("div", { class: "modal-box", role: "dialog", "aria-label": "Note" }, h("div", { class: "modal-head" }, h("strong", {}, editor.isNew ? "New note" : \`Note \${a.id}\`), h("span", { class: "muted mono small" }, targetLabel(a))), h("blockquote", { class: "quote" }, quote.length > 600 ? \`\${quote.slice(0, 600)}…\` : quote), h("div", { class: "seg" }, ANN_KEYS.map(([k, , label]) => h("button", {
       class: \`pill k-\${k} \${a.kind === k ? "on" : ""}\`,
+      tip: ANN_TIP[k],
       onclick: () => {
         a.kind = k;
         if (k === "suggestion" && a.suggestion === undefined)
@@ -4510,6 +5759,27 @@ td.st-adjudicated {
         render();
       }
     }, label))), suggestion ? [h("label", { class: "lbl" }, "Replace the quoted text with"), suggestion] : null, h("label", { class: "lbl" }, a.kind === "suggestion" ? "Note" : "Note to the agent"), comment, h("div", { class: "row" }, editor.isNew ? null : h("button", { class: "btn ghost danger", onclick: () => deleteAnnotation(a.id) }, "Delete"), h("span", { class: "grow" }), h("button", { class: "btn ghost", onclick: closeEditor }, "Cancel", h("kbd", {}, "Esc")), h("button", { class: "btn primary", onclick: saveEditor }, "Save note", h("kbd", {}, "⌘↵")))));
+  }
+  function placeNear(el, anchor, prefer) {
+    el.style.visibility = "hidden";
+    el.style.top = "0px";
+    el.style.left = "0px";
+    document.body.append(el);
+    const w = el.offsetWidth;
+    const ht = el.offsetHeight;
+    const m = 8;
+    const above = anchor.top - ht - 6;
+    const below = anchor.bottom + 6;
+    let top = prefer === "above" ? above : below;
+    if (prefer === "above" && above < m)
+      top = below;
+    if (prefer === "below" && below + ht > window.innerHeight - m)
+      top = above >= m ? above : below;
+    top = Math.max(m, Math.min(top, window.innerHeight - ht - m));
+    const left = Math.max(m, Math.min(anchor.left, window.innerWidth - w - m));
+    el.style.top = \`\${top}px\`;
+    el.style.left = \`\${left}px\`;
+    el.style.visibility = "";
   }
   var toolbarEl = null;
   function hideToolbar() {
@@ -4524,40 +5794,54 @@ td.st-adjudicated {
     const sel = window.getSelection();
     if (!p || !sel || sel.rangeCount === 0)
       return;
-    const rect = sel.getRangeAt(0).getBoundingClientRect();
-    toolbarEl = h("div", {
-      class: "toolbar",
-      style: \`top:\${Math.max(8, rect.top - 46)}px;left:\${Math.max(8, Math.min(rect.left, window.innerWidth - 560))}px\`
-    }, ANN_KEYS.map(([k, key, label]) => h("button", {
+    const rects = sel.getRangeAt(0).getClientRects();
+    const rect = rects[0] ?? sel.getRangeAt(0).getBoundingClientRect();
+    toolbarEl = h("div", { class: "toolbar", role: "toolbar", "aria-label": "Add a note" }, ANN_KEYS.map(([k, key, label]) => h("button", {
       class: \`tb k-\${k}\`,
+      tip: ANN_TIP[k],
       onmousedown: (e) => e.preventDefault(),
       onclick: () => openEditor(k)
     }, label, h("kbd", {}, key))));
-    document.body.append(toolbarEl);
+    placeNear(toolbarEl, rect, "above");
   }
   var peekEl = null;
   var peekTimer;
-  function refLink(r, label, cls = "") {
-    const el = h("button", { class: \`ref \${cls}\`, onclick: () => showBeside(r) }, label, icon("ext"));
-    el.addEventListener("mouseenter", () => {
+  function hoverPeek(el, build) {
+    const show = (delay) => {
       clearTimeout(peekTimer);
-      peekTimer = setTimeout(() => showPeek(el, r), 350);
-    });
-    el.addEventListener("mouseleave", () => {
+      peekTimer = setTimeout(() => {
+        const body = build();
+        if (!body)
+          return;
+        hidePeek();
+        peekEl = body;
+        peekEl.addEventListener("mouseenter", () => clearTimeout(peekTimer));
+        peekEl.addEventListener("mouseleave", hidePeek);
+        placeNear(peekEl, el.getBoundingClientRect(), "below");
+      }, delay);
+    };
+    const hide = () => {
       clearTimeout(peekTimer);
       peekTimer = setTimeout(hidePeek, 200);
-    });
+    };
+    el.addEventListener("mouseenter", () => show(350));
+    el.addEventListener("mouseleave", hide);
+    el.addEventListener("focus", () => show(150));
+    el.addEventListener("blur", hide);
+  }
+  function refLink(r, label, cls = "") {
+    const el = h("button", { class: \`ref \${cls}\`, onclick: () => showBeside(r) }, label, icon("ext"));
+    hoverPeek(el, () => filePeek(r));
     return el;
   }
   function hidePeek() {
     peekEl?.remove();
     peekEl = null;
   }
-  function showPeek(anchor, r) {
-    hidePeek();
+  function filePeek(r) {
     const text = fileText(r.path);
     if (text === undefined)
-      return;
+      return null;
     const range = refRange(r, text);
     const at = range ? lineOf(text, range.start) : 1;
     const to = range ? lineOf(text, range.end) : 14;
@@ -4566,13 +5850,143 @@ td.st-adjudicated {
       lines: { start: Math.max(1, at - 3), end: Math.min(to + 3, at + 30) },
       compact: true
     });
-    const box = anchor.getBoundingClientRect();
-    const top = Math.min(window.innerHeight - 280, box.bottom + 6);
-    const left = Math.max(8, Math.min(window.innerWidth - 660, box.left));
-    peekEl = h("div", { class: "peek", style: \`top:\${top}px;left:\${left}px\` }, h("div", { class: "peek-head mono" }, r.path), body);
-    peekEl.addEventListener("mouseenter", () => clearTimeout(peekTimer));
-    peekEl.addEventListener("mouseleave", hidePeek);
-    document.body.append(peekEl);
+    return h("div", { class: "peek" }, h("div", { class: "peek-head mono" }, r.path), body);
+  }
+  function mdSummary(text) {
+    const out = {};
+    const h1 = /^#{1,3}\\s+(.+)$/m.exec(text);
+    if (h1)
+      out.title = clean(h1[1]);
+    const st = /\\*\\*Status:\\*\\*\\s*\`?([^·\\n\`*]+)/.exec(text);
+    if (st)
+      out.status = st[1].trim().replace(/[.,]$/, "");
+    for (const para of text.split(/\\n\\s*\\n/)) {
+      const t = para.trim();
+      if (!t || /^#|^\\||^\`\`\`|^\\s*>?\\s*\\*\\*Status/.test(t))
+        continue;
+      const plain = clean(t.replace(/^>\\s?/gm, "").replace(/^-\\s+\\*\\*[^*]+:\\*\\*\\s*/, ""));
+      if (plain.length < 12)
+        continue;
+      const sentence = /^(.{20,}?[.!?])(\\s|$)/.exec(plain)?.[1] ?? plain;
+      out.summary = sentence.length > 240 ? \`\${sentence.slice(0, 237)}…\` : sentence;
+      break;
+    }
+    return out;
+  }
+  function clean(t) {
+    return t.replace(/\\[([^\\]]+)\\]\\([^)]*\\)/g, "$1").replace(/[\`*_]/g, "").replace(/\\s+/g, " ").trim();
+  }
+  function sfBlock(path, sfId) {
+    const text = fileText(path) ?? "";
+    const at = text.search(new RegExp(\`^#{2,3}\\\\s+\${sfId}\\\\b\`, "m"));
+    if (at < 0)
+      return "";
+    const rest = text.slice(at);
+    const next = rest.slice(3).search(/^#{1,3}\\s/m);
+    return next < 0 ? rest : rest.slice(0, next + 3);
+  }
+  function resolveLink(link) {
+    const [kind, rest = ""] = [link.slice(0, link.indexOf(":")), link.slice(link.indexOf(":") + 1)];
+    if (kind === "sf") {
+      const row = (S.packet.ledger ?? []).find((r) => r.id === rest);
+      const i = items().findIndex((x) => x.id === rest);
+      const it = items()[i];
+      const sfId = rest.split("/").pop();
+      const path2 = row?.source.path ?? it?.source.path;
+      const friction = it?.sections.find((x) => x.key === "friction")?.text;
+      const block = path2 ? sfBlock(path2, sfId) : "";
+      const t2 = { label: shortId(rest), title: row?.title ?? it?.title ?? sfId };
+      const status = row?.status ?? it?.status;
+      if (status)
+        t2.status = status;
+      const sum2 = mdSummary(friction ?? block.replace(/^#.*\\n/, ""));
+      if (sum2.summary)
+        t2.summary = sum2.summary;
+      if (i >= 0)
+        t2.item = i;
+      if (path2)
+        t2.focus = {
+          path: path2,
+          lines: {
+            start: row?.source.line ?? it?.source.line ?? 1,
+            end: row?.source.line ?? it?.source.line ?? 1
+          }
+        };
+      return t2;
+    }
+    const path = kind === "entry" ? \`\${IDX.entries.get(rest)}/README.md\` : kind === "adr" ? IDX.adrs.get(rest) : kind === "file" ? rest : undefined;
+    if (!path || fileText(path) === undefined)
+      return null;
+    const sum = mdSummary(fileText(path) ?? "");
+    const t = {
+      label: kind === "adr" ? \`ADR \${rest}\` : kind === "entry" ? \`Design entry \${rest}\` : path,
+      focus: { path }
+    };
+    if (sum.title)
+      t.title = sum.title;
+    if (sum.status)
+      t.status = sum.status;
+    if (sum.summary)
+      t.summary = sum.summary;
+    return t;
+  }
+  function linkCard(link) {
+    const t = resolveLink(link);
+    if (!t)
+      return null;
+    return h("div", { class: "peek card-peek" }, h("div", { class: "cp-head" }, h("span", { class: "mono" }, t.label), t.status ? h("span", { class: \`tag st-\${t.status.split(" ")[0]}\` }, t.status) : null), t.title ? h("div", { class: "cp-title" }, t.title) : null, t.summary ? h("div", { class: "cp-sum" }, t.summary) : null, h("div", { class: "cp-hint" }, t.item !== undefined ? "Click to open this item" : "Click to open"));
+  }
+  function followLink(link) {
+    const t = resolveLink(link);
+    if (!t)
+      return;
+    hidePeek();
+    if (t.item !== undefined)
+      select(t.item);
+    else if (t.focus)
+      showBeside(t.focus);
+  }
+  var tipEl = null;
+  var tipTimer;
+  var tipFor = null;
+  function hideTip() {
+    clearTimeout(tipTimer);
+    tipEl?.remove();
+    tipEl = null;
+    tipFor = null;
+  }
+  function initTips() {
+    const showFor = (el, delay) => {
+      if (tipFor === el)
+        return;
+      hideTip();
+      tipFor = el;
+      tipTimer = setTimeout(() => {
+        if (!el.isConnected)
+          return;
+        tipEl = h("div", { class: "tip", role: "tooltip", id: "tip" }, el.dataset.tip ?? "");
+        el.setAttribute("aria-describedby", "tip");
+        placeNear(tipEl, el.getBoundingClientRect(), "below");
+      }, delay);
+    };
+    document.addEventListener("mouseover", (e) => {
+      const el = e.target.closest?.("[data-tip]");
+      if (el)
+        showFor(el, 700);
+    });
+    document.addEventListener("mouseout", (e) => {
+      const el = e.target.closest?.("[data-tip]");
+      if (el && !el.contains(e.relatedTarget))
+        hideTip();
+    });
+    document.addEventListener("focusin", (e) => {
+      const el = e.target.closest?.("[data-tip]");
+      if (el?.matches(":focus-visible"))
+        showFor(el, 150);
+    });
+    for (const ev of ["focusout", "mousedown", "keydown", "scroll"]) {
+      document.addEventListener(ev, hideTip, true);
+    }
   }
   function showBeside(r) {
     hidePeek();
@@ -4588,29 +6002,164 @@ td.st-adjudicated {
     scrollWanted = true;
     render();
   }
+  var TABS = [
+    ["home", "Home", "1"],
+    ["queue", "Queue", "2"],
+    ["files", "Files", "3"],
+    ["dashboard", "Dashboard", "4"],
+    ["submit", "Review & submit", "5"]
+  ];
   function header() {
     const p = S.packet;
-    const tabs = [
-      ["queue", "Queue", "1"],
-      ["files", "Files", "2"],
-      ["dashboard", "Dashboard", "3"],
-      ["submit", "Review & submit", "4"]
-    ];
     const ruled = S.review.verdicts.length;
     const total = items().length;
     const sub = p.mode === "branch" && p.change ? \`\${p.change.head.ref} → \${p.change.base.ref} · \${p.change.head.sha.slice(0, 7)}\` : p.repo.ref ?? p.repo.name;
-    return h("header", { class: "top" }, h("div", { class: "brand" }, h("div", { class: "title" }, p.title), h("div", { class: "sub" }, h("span", { class: \`mode m-\${p.mode}\` }, p.mode === "branch" ? "Branch review" : "Main"), " ", sub, p.iteration && p.iteration > 1 ? \` · iteration \${p.iteration}\` : "")), h("nav", { class: "tabs" }, tabs.map(([v, label, key]) => h("button", { class: \`tab \${S.view === v ? "on" : ""}\`, onclick: () => go(v) }, label, h("kbd", {}, key)))), h("div", { class: "status" }, h("div", { class: "meter", title: \`\${ruled} of \${total} ruled\` }, h("div", { class: "track" }, h("div", { class: "bar", style: \`width:\${total ? 100 * ruled / total : 0}%\` })), h("span", {}, \`\${ruled}/\${total}\`)), h("span", { id: "save-state", class: \`save \${S.saved}\` }), h("button", {
+    const theme = allThemes().find((t) => t.id === S.theme);
+    return h("header", { class: "top" }, h("button", { class: "brand", onclick: () => go("home"), tip: "Back to the home page (1)" }, h("div", { class: "title" }, p.title), h("div", { class: "sub" }, h("span", { class: \`mode m-\${p.mode}\` }, p.mode === "branch" ? "Branch review" : "Main"), " ", sub, p.iteration && p.iteration > 1 ? \` · iteration \${p.iteration}\` : "")), h("nav", { class: "tabs", "aria-label": "Views" }, TABS.map(([v, label, key]) => h("button", { class: \`tab \${S.view === v ? "on" : ""}\`, onclick: () => go(v), tip: VIEW_TIP[v] }, label, h("kbd", {}, key)))), h("div", { class: "status" }, h("div", { class: "meter", tip: \`\${ruled} of \${total} items have your ruling\` }, h("div", { class: "track" }, h("div", { class: "bar", style: \`width:\${total ? 100 * ruled / total : 0}%\` })), h("span", {}, \`\${ruled}/\${total}\`)), h("span", { id: "save-state", class: \`save \${S.saved}\` }), h("button", {
       class: \`btn ghost sm \${S.drawer ? "on" : ""}\`,
-      title: "Everything this session (p)",
+      tip: "This session — every ruling and note so far; jump back to any of them, edit or remove them (p)",
       onclick: toggleDrawer
-    }, "Session", h("span", { id: "session-count", class: "count" }, "0")), h("button", { class: "icon-btn", title: "Light / dark (t)", onclick: toggleTheme }, "◐"), h("button", {
-      class: "icon-btn",
-      title: "Keys (?)",
+    }, "Session", h("span", { id: "session-count", class: "count" }, "0")), h("button", {
+      class: \`btn ghost sm theme-btn \${S.picker ? "on" : ""}\`,
+      tip: "Theme — choose the colours, or add your own (t)",
       onclick: () => {
-        S.help = !S.help;
+        S.picker = !S.picker;
         render();
       }
-    }, "?")));
+    }, h("span", { class: "swatch", style: theme ? swatchStyle(theme) : "" }), theme?.name ?? "Theme")));
+  }
+  var THEME_DOCS = "https://github.com/crumley/intent-architecture/blob/main/.agents/skills/intent-architecture/references/review-themes.md";
+  var allThemes = () => [...THEMES, ...S?.customThemes ?? []];
+  function swatchStyle(t) {
+    const c = t.colors;
+    return \`background:conic-gradient(\${c.accent} 0 25%, \${c.heading} 0 50%, \${c.xref} 0 75%, \${c.surface} 0)\`;
+  }
+  function injectThemes(list) {
+    let el = document.getElementById("theme-css");
+    if (!el) {
+      el = document.createElement("style");
+      el.id = "theme-css";
+      document.head.append(el);
+    }
+    el.textContent = list.map(themeCss).join(\`
+\`);
+  }
+  function applyTheme(id, save = true) {
+    document.documentElement.dataset.theme = id;
+    if (S)
+      S.theme = id;
+    if (save)
+      api("PUT", "/api/prefs", { theme: id }).catch(() => {
+        return;
+      });
+  }
+  function themePicker() {
+    if (!S.picker)
+      return null;
+    const option = (t) => h("button", {
+      class: \`theme-opt \${t.id === S.theme ? "on" : ""}\`,
+      role: "menuitemradio",
+      "aria-checked": t.id === S.theme ? "true" : "false",
+      onclick: () => {
+        applyTheme(t.id);
+        render();
+      }
+    }, h("span", { class: "swatch big", style: swatchStyle(t) }), h("span", { class: "theme-name" }, t.name), h("span", { class: "muted small" }, t.dark ? "dark" : "light"));
+    return h("div", { class: "picker", role: "menu", "aria-label": "Themes" }, h("div", { class: "eyebrow" }, "Themes"), THEMES.map(option), S.customThemes.length ? [h("div", { class: "eyebrow" }, "Yours"), S.customThemes.map(option)] : null, h("div", { class: "picker-foot small" }, "Make your own: a small JSON file naming a base theme and the colours to change, placed in ", h("span", { class: "mono" }, S.themeDir ?? "~/.config/intent-review/themes"), " or passed with ", h("span", { class: "mono" }, "--theme"), ". ", h("a", { href: THEME_DOCS, target: "_blank", rel: "noopener noreferrer" }, "How to write a theme ↗")));
+  }
+  function loadFolds() {
+    try {
+      return JSON.parse(sessionStorage.getItem("intent-review-folds") ?? "{}");
+    } catch {
+      return {};
+    }
+  }
+  function saveFolds() {
+    try {
+      sessionStorage.setItem("intent-review-folds", JSON.stringify(S.folds));
+    } catch {}
+  }
+  function homeView() {
+    const p = S.packet;
+    const its = items();
+    const count = (f) => its.filter(f).length;
+    const firstOf = (f) => {
+      const order = displayOrder();
+      const i = order.find((n) => f(its[n]) && !verdictOf(its[n].id)) ?? order.find((n) => f(its[n]));
+      return i;
+    };
+    const asks = [
+      [
+        "Spec-feedback to rule on",
+        "Frictions a build found in the intent, each with a proposed revision.",
+        (i) => i.kind === "sf" && i.status !== "ruled"
+      ],
+      [
+        "Rulings awaiting their wording",
+        "Already ruled; confirm the words that land the ruling in the intent.",
+        (i) => i.kind === "sf" && i.status === "ruled"
+      ],
+      [
+        "Open questions",
+        "Cross-cutting questions the intent tracks as unresolved.",
+        (i) => i.kind === "question"
+      ],
+      [
+        "Decisions still proposed",
+        "Design decisions (ADRs) nobody has taken yet.",
+        (i) => i.kind === "decision"
+      ],
+      [
+        "Intent changes",
+        "Edits this branch makes to the intent itself.",
+        (i) => i.kind === "intent-change"
+      ],
+      [
+        "Design entries",
+        "Design entries this branch adds or changes.",
+        (i) => i.kind === "design-entry"
+      ],
+      [
+        "Findings",
+        "Things an agent noticed that need your judgment.",
+        (i) => !["sf", "question", "decision", "intent-change", "design-entry"].includes(i.kind)
+      ]
+    ];
+    const ruled = S.review.verdicts.length;
+    const next = displayOrder().find((n) => !verdictOf(its[n].id));
+    const intro = p.mode === "branch" && p.change ? p.change.summary : p.intro;
+    return h("main", { class: "page home", "data-scroll": "home" }, h("div", { class: "page-inner narrow" }, h("div", { class: "eyebrow" }, p.mode === "branch" ? "Branch review" : "Review of the main line"), h("h1", { class: "home-title" }, p.title), h("p", { class: "lead" }, p.mode === "branch" && p.change ? \`What \${p.change.head.ref} does to the intent and design, measured against \${p.change.base.ref} — so you can decide before it merges. Rule on each change, then give the branch an overall verdict.\` : "Everything in this repository that is waiting on a human decision: rule on each item, note anything you see along the way, then hand it back. An agent prepared this and carries out what you decide."), intro || p.change?.recommendation ? h("div", { class: "rec-card" }, h("div", { class: "rec-head" }, h("span", { class: "eyebrow" }, "The agent’s overview"), p.change?.recommendation ? h("span", { class: \`vchip big o-\${p.change.recommendation.verdict}\` }, p.change.recommendation.verdict) : null), intro ? plainProse(intro, {}) : null, p.change?.recommendation ? h("p", { class: "rec-why" }, p.change.recommendation.why) : null) : null, h("h2", {}, "What you are asked to do"), h("div", { class: "asks" }, asks.filter(([, , f]) => count(f) > 0).map(([label, desc, f]) => {
+      const n = count(f);
+      const done = its.filter((i) => f(i) && verdictOf(i.id)).length;
+      const first = firstOf(f);
+      return h("button", { class: "ask", onclick: () => first !== undefined && select(first) }, h("span", { class: "ask-n" }, String(n)), h("span", { class: "ask-body" }, h("strong", {}, label), h("span", { class: "muted small" }, desc)), h("span", { class: "ask-done small muted" }, done ? \`\${done} ruled\` : ""));
+    }), p.mode === "branch" ? h("button", { class: "ask", onclick: () => go("submit") }, h("span", { class: "ask-n" }, "1"), h("span", { class: "ask-body" }, h("strong", {}, "Overall verdict"), h("span", { class: "muted small" }, "Approve, request changes, or comment — given on Review & submit.")), h("span", { class: "ask-done small muted" }, S.review.overall ? S.review.overall.verdict : "")) : null), h("div", { class: "row cta" }, h("button", {
+      class: "btn primary big",
+      onclick: () => next !== undefined ? select(next) : go("submit")
+    }, ruled === 0 ? "Start reviewing →" : next !== undefined ? "Continue reviewing →" : "Review & submit →"), h("span", { class: "muted small" }, \`\${ruled} of \${its.length} ruled · \${S.review.annotations.length} notes · your work saves as you go\`)), h("h2", {}, "How to go through it"), h("ol", { class: "steps" }, h("li", {}, h("strong", {}, "Work the queue. "), "Each item opens with the agent’s recommendation and summary, then the proposed change. Supporting detail — the friction, the assumption, the slice — is folded away until you want it. The intent the item touches is shown beside it."), h("li", {}, h("strong", {}, "Rule at the foot of the item. "), "The consequences of each choice sit above the five rulings. Hover any ruling to see exactly what it asks of the agent."), h("li", {}, h("strong", {}, "Note anything, anywhere. "), "Select text — in an item, in the intent, in code — and a small toolbar offers five kinds of note."), h("li", {}, h("strong", {}, "Follow the identifiers. "), "SF numbers, entry numbers like 0031, ADRs, and file paths are links: hover to peek, click to go."), h("li", {}, h("strong", {}, "Hand it back. "), "On Review & submit, check the list and submit. The agent carries everything out and may come back with a smaller packet.")), h("h2", {}, "The views"), h("div", { class: "cards3" }, TABS.filter(([v]) => v !== "home").map(([v, label, key]) => h("button", { class: "card view-card", onclick: () => go(v) }, h("div", { class: "row" }, h("strong", {}, label), h("kbd", {}, key)), h("p", { class: "small muted" }, VIEW_TIP[v].replace(/^[^—]+— /, ""))))), h("h2", {}, "Your rulings"), h("dl", { class: "defs" }, VERDICT_KEYS.map(([k, key]) => [
+      h("dt", {}, h("span", { class: \`vchip v-\${k}\` }, k), h("kbd", {}, key)),
+      h("dd", {}, VERDICT_TIP[k].replace(/^[^—]+— /, ""))
+    ])), h("h2", {}, "Kinds of note"), h("dl", { class: "defs" }, ANN_KEYS.map(([k, key, label]) => [
+      h("dt", {}, h("span", { class: \`pill k-\${k}\` }, label), h("kbd", {}, key)),
+      h("dd", {}, ANN_TIP[k].replace(/^[^—]+— /, ""))
+    ])), h("h2", {}, "Keyboard"), keysTable()));
+  }
+  function keysTable() {
+    const rows = [
+      ["1 2 3 4 5", "Home · queue · files · dashboard · review & submit"],
+      ["j k", "Next / previous item (or file)"],
+      ["n", "Next unreviewed item"],
+      ["a m d f r", "Accept · amend · decline · defer · revise"],
+      ["u", "Clear the ruling"],
+      ["c q s i x", "Comment · question · suggest · intent here · mismatch — on selected text"],
+      ["p", "This session: every ruling and note"],
+      ["v", "Markdown as prose / as source"],
+      ["/", "Filter files"],
+      ["t", "Themes"],
+      ["?", "This list"],
+      ["⌘↵ Esc", "Confirm / leave a text field"]
+    ];
+    return h("table", { class: "keys" }, h("tbody", {}, rows.map(([k, d]) => h("tr", {}, h("td", {}, k.split(" ").map((x) => h("kbd", {}, x))), h("td", {}, d)))));
   }
   function toggleDrawer() {
     S.drawer = !S.drawer;
@@ -4687,7 +6236,6 @@ td.st-adjudicated {
   }
   function queueNav() {
     const order = displayOrder();
-    const c = S.packet.change;
     const list = S.packet.mode === "branch" ? GROUPS.map(([g, label]) => {
       const m = order.filter((i) => (items()[i]?.attention ?? "none") === g);
       if (!m.length)
@@ -4697,13 +6245,20 @@ td.st-adjudicated {
         m.map((i) => queueRow(items()[i], i))
       ];
     }) : order.map((i) => queueRow(items()[i], i));
-    return h("aside", { class: "nav", "data-scroll": "nav" }, S.packet.mode === "branch" && c ? h("div", { class: "overview" }, h("div", { class: "row" }, h("span", { class: "eyebrow" }, "The agent’s read"), c.recommendation ? h("span", { class: \`vchip o-\${c.recommendation.verdict}\` }, c.recommendation.verdict) : null), c.summary ? plainProse(c.summary) : null, c.recommendation ? h("p", { class: "small muted" }, c.recommendation.why) : null) : null, S.packet.intro ? h("details", { class: "overview", open: true }, h("summary", { class: "eyebrow" }, "About this review"), plainProse(S.packet.intro)) : null, items().length === 0 ? h("p", { class: "muted pad" }, "Nothing to review in this packet.") : null, list);
+    return h("aside", { class: "nav", "data-scroll": "nav", "aria-label": "Items" }, h("button", { class: "nav-home small", onclick: () => go("home"), tip: VIEW_TIP.home }, "← What this review is about"), items().length === 0 ? h("p", { class: "muted pad" }, "Nothing to review in this packet.") : null, list);
   }
   function queueView() {
     const it = currentItem();
     return h("div", { class: "layout queue" }, queueNav(), it ? itemDetail(it) : h("main", { class: "center" }, h("div", { class: "doc muted" }, "No item selected.")), it ? sidePane(it) : null);
   }
-  var COLLAPSED = new Set(["slice", "entry-context"]);
+  var FOLDED_BY_DEFAULT = new Set([
+    "slice",
+    "friction",
+    "assumption",
+    "revision",
+    "entry-context",
+    "notes"
+  ]);
   function itemDetail(it) {
     const v = verdictOf(it.id);
     const a = it.analysis;
@@ -4711,28 +6266,41 @@ td.st-adjudicated {
     const sections = it.sections.filter((s) => s.key !== "on-branch");
     const onBranch = it.sections.find((s) => s.key === "on-branch");
     const notes = annotationsForItem(it.id);
+    const ctx = itemCtx(it);
     const sourceRef = { path: it.source.path, lines: { start: it.source.line, end: it.source.line } };
-    const doc = h("div", { class: "doc" }, h("div", { class: "eyebrow-row" }, h("span", { class: "tag strong" }, kindLabel(it)), it.category ? h("span", { class: "tag" }, it.category) : null, it.status ? h("span", { class: \`tag st-\${it.status}\` }, it.status) : null, it.attention ? h("span", { class: \`tag at-\${it.attention}\` }, it.attention === "judgment" ? "needs judgment" : "routine") : null, h("span", { class: "grow" }), fileText(it.source.path) !== undefined ? refLink(sourceRef, \`\${it.source.path}:\${it.source.line}\`, "quiet") : h("span", { class: "mono small muted" }, \`\${it.source.path}:\${it.source.line}\`)), h("h1", { class: "item-title" }, it.title), onBranch ? h("div", { class: "callout info" }, onBranch.text) : null, it.statusLine && (it.status === "ruled" || it.baseStatusLine !== undefined) ? h("div", { class: "callout warn" }, h("strong", {}, "Status "), it.statusLine) : null, it.baseStatusLine ? h("div", { class: "callout" }, h("strong", {}, "At base "), it.baseStatusLine) : null, rec || a?.summary ? h("div", { class: \`rec-card \${rec ? \`r-\${rec.verdict}\` : ""}\` }, h("div", { class: "rec-head" }, h("span", { class: "eyebrow" }, rec ? "Agent recommends" : "Agent’s summary"), rec ? h("span", { class: \`vchip big v-\${rec.verdict}\` }, capitalize(verdictLabel(it, rec.verdict))) : null), rec ? h("p", { class: "rec-why" }, rec.why) : null, a?.summary ? plainProse(a.summary) : null) : null, it.evidence.length ? h("section", { class: "sec" }, h("h2", {}, it.kind === "sf" || it.kind === "question" ? "The intent in question" : "Evidence"), it.evidence.map((r) => {
-      const text = fileText(r.path);
-      const missing = r.quote && text !== undefined && !text.includes(r.quote);
-      return h("div", { class: "evidence" }, h("div", { class: "ev-head" }, refLink(r, refLabel(r)), r.section ? h("span", { class: "muted small" }, \`§ \${r.section}\`) : null, missing ? h("span", { class: "warn small" }, "quote not found in the snapshot") : null), r.note ? h("p", { class: "small muted" }, r.note) : null, excerpt(r));
-    })) : null, sections.map((s) => collapsible(s.label, itemText(it, s.key, s.text), !COLLAPSED.has(s.key), annotationsOn({ kind: "item", item: it.id, section: s.key }).length)), it.proposal ? proposalSection(it) : null, it.changes?.length ? h("section", { class: "sec" }, h("h2", {}, "Changes on this branch"), it.changes.map((c) => collapsible(h("span", { class: "row" }, h("span", { class: \`tag ch-\${c.status}\` }, c.status), h("span", { class: "mono small" }, c.oldPath ? \`\${c.oldPath} → \${c.path}\` : c.path)), c.status === "added" && langOf(c.path) === "markdown" && fileText(c.path) !== undefined ? h("div", { class: "added-doc" }, fileView(c.path)) : patchView(c), c.patch.split(\`
-\`).length < 160))) : null, a && (a.ifAccepted || a.ifDeclined) ? h("section", { class: "sec" }, h("h2", {}, "Consequences"), h("div", { class: "two" }, a.ifAccepted ? h("div", { class: "card" }, h("div", { class: "eyebrow" }, isChange(it) ? "If approved" : "If accepted"), plainProse(a.ifAccepted)) : null, a.ifDeclined ? h("div", { class: "card" }, h("div", { class: "eyebrow" }, isChange(it) ? "If rejected" : "If declined"), plainProse(a.ifDeclined)) : null)) : null, a?.relations?.length ? h("section", { class: "sec" }, h("h2", {}, "Related items"), h("ul", { class: "rel" }, a.relations.map((r) => h("li", {}, h("button", {
+    const doc = h("div", { class: "doc" }, h("div", { class: "eyebrow-row" }, h("span", { class: "tag strong" }, kindLabel(it)), it.category ? h("span", { class: "tag" }, it.category) : null, it.status ? h("span", { class: \`tag st-\${it.status}\` }, it.status) : null, it.attention ? h("span", { class: \`tag at-\${it.attention}\` }, it.attention === "judgment" ? "needs judgment" : "routine") : null, h("span", { class: "grow" }), fileText(it.source.path) !== undefined ? refLink(sourceRef, \`\${it.source.path}:\${it.source.line}\`, "quiet") : h("span", { class: "mono small muted" }, \`\${it.source.path}:\${it.source.line}\`)), h("h1", { class: "item-title" }, linked(it.title, ctx)), onBranch ? h("div", { class: "callout info" }, linked(onBranch.text, ctx)) : null, it.statusLine && (it.status === "ruled" || it.baseStatusLine !== undefined) ? h("div", { class: "callout warn" }, h("strong", {}, "Status "), linked(it.statusLine, ctx)) : null, it.baseStatusLine ? h("div", { class: "callout" }, h("strong", {}, "At base "), linked(it.baseStatusLine, ctx)) : null, rec || a?.summary ? h("div", { class: \`rec-card \${rec ? \`r-\${rec.verdict}\` : ""}\` }, h("div", { class: "rec-head" }, h("span", { class: "eyebrow" }, rec ? "Agent recommends" : "Agent’s summary"), rec ? h("span", {
+      class: \`vchip big v-\${rec.verdict}\`,
+      tip: (isChange(it) ? CHANGE_TIP : VERDICT_TIP)[rec.verdict]
+    }, capitalize(verdictLabel(it, rec.verdict))) : null), rec ? h("p", { class: "rec-why" }, linked(rec.why, ctx)) : null, a?.summary ? plainProse(a.summary, ctx) : null) : null, it.proposal ? proposalSection(it) : null, it.changes?.length ? h("section", { class: "sec" }, h("h2", {}, "Changes on this branch"), it.changes.map((c) => collapsible(h("span", { class: "row" }, h("span", { class: \`tag ch-\${c.status}\` }, c.status), h("span", { class: "mono small" }, c.oldPath ? \`\${c.oldPath} → \${c.path}\` : c.path)), c.status === "added" && langOf(c.path) === "markdown" && fileText(c.path) !== undefined ? h("div", { class: "added-doc" }, fileView(c.path)) : patchView(c), c.patch.split(\`
+\`).length < 160, 0, \`change:\${c.path}\`))) : null, a?.relations?.length ? h("section", { class: "sec" }, h("h2", {}, "Related items"), h("ul", { class: "rel" }, a.relations.map((r) => h("li", {}, h("button", {
       class: "ref",
       onclick: () => select(items().findIndex((x) => x.id === r.item))
-    }, shortId(r.item)), h("span", {}, r.note))))) : null, !a && !isChange(it) ? h("p", { class: "muted small sec" }, "The packet carries no analysis for this item.") : null, notes.length ? h("section", { class: "sec" }, h("h2", {}, \`Your notes on this item · \${notes.length}\`), noteList(notes)) : h("p", { class: "hint" }, "Select any text — here, in an excerpt, or in the file beside — then press ", h("kbd", {}, "c"), " to comment, ", h("kbd", {}, "s"), " to suggest wording, or ", h("kbd", {}, "i"), " to say what the intent is."));
+    }, shortId(r.item)), h("span", {}, linked(r.note, ctx)))))) : null, !a && !isChange(it) ? h("p", { class: "muted small sec" }, "The packet carries no analysis for this item.") : null, it.evidence.length ? collapsible(it.kind === "sf" || it.kind === "question" ? "The intent in question" : "Evidence", h("div", {}, it.evidence.map((r) => {
+      const text = fileText(r.path);
+      const missing = r.quote && text !== undefined && !text.includes(r.quote);
+      return h("div", { class: "evidence" }, h("div", { class: "ev-head" }, refLink(r, refLabel(r)), r.section ? h("span", { class: "muted small" }, \`§ \${r.section}\`) : null, missing ? h("span", { class: "warn small" }, "quote not found in the snapshot") : null), r.note ? h("p", { class: "small muted" }, linked(r.note, ctx)) : null, excerpt(r));
+    })), true, 0, "evidence") : null, sections.length ? h("div", { class: "supporting" }, h("div", { class: "eyebrow" }, it.kind === "sf" ? "The spec-feedback as written" : "Detail"), sections.map((s) => collapsible(s.label, itemText(it, s.key, s.text), !FOLDED_BY_DEFAULT.has(s.key), annotationsOn({ kind: "item", item: it.id, section: s.key }).length, \`sec:\${s.key}\`))) : null, notes.length ? collapsible(\`Your notes on this item · \${notes.length}\`, noteList(notes), true, 0, "item-notes") : h("p", { class: "hint" }, "Select any text — here, in an excerpt, or in the file beside — to leave a note. Hover a note kind to see what it asks of the agent."));
     return h("main", { class: "center", "data-scroll": \`detail:\${it.id}\` }, doc, rulingBar(it, v));
   }
   function proposalSection(it) {
     const pr = it.proposal;
-    return h("section", { class: "sec" }, h("h2", {}, "Proposed edit"), pr.summary ? h("p", { class: "lead" }, pr.summary) : null, pr.edits.map((e) => {
+    const ctx = itemCtx(it);
+    return h("section", { class: "sec" }, h("h2", {}, "Proposed edit"), pr.summary ? h("p", { class: "lead" }, linked(pr.summary, ctx)) : null, pr.edits.map((e) => {
       const text = fileText(e.path) ?? "";
       const at = text.indexOf(e.before);
       return h("div", { class: "edit" }, h("div", { class: "ev-head" }, refLink({ path: e.path, quote: e.before }, at >= 0 ? \`\${e.path}:\${lineOf(text, at)}\` : e.path), at < 0 ? h("span", { class: "warn small" }, "the “before” text is not in the snapshot") : null), wordDiff(e.before, e.after));
     }));
   }
-  function collapsible(title, body, open, count = 0) {
-    return h("details", { class: "sec fold", open: open ? true : undefined }, h("summary", {}, icon("chev"), typeof title === "string" ? h("span", { class: "h2" }, title) : title, count ? h("span", { class: "badge" }, String(count)) : null), body);
+  function collapsible(title, body, open, count = 0, key) {
+    const isOpen = key !== undefined && key in S.folds ? S.folds[key] : open;
+    const el = h("details", { class: "sec fold", open: isOpen ? true : undefined }, h("summary", {}, icon("chev"), typeof title === "string" ? h("span", { class: "h2" }, title) : title, count ? h("span", { class: "badge" }, String(count)) : null), body);
+    if (key !== undefined) {
+      el.addEventListener("toggle", () => {
+        S.folds[key] = el.open;
+        saveFolds();
+      });
+    }
+    return el;
   }
   function noteList(list) {
     return h("div", { class: "notes" }, list.map((a) => {
@@ -4775,13 +6343,16 @@ td.st-adjudicated {
   function rulingBar(it, v) {
     const field = v ? v.verdict === "defer" ? "ruling" : REQUIRED_WORDS[v.verdict] : null;
     const blur = () => document.activeElement?.blur();
+    const a = it.analysis;
+    const ctx = itemCtx(it);
+    const tips = isChange(it) ? CHANGE_TIP : VERDICT_TIP;
     let words = null;
     if (v && field) {
       const copy = fieldCopy(it, field);
       words = h("textarea", {
         id: "verdict-words",
         class: \`field \${field === "wording" ? "mono" : ""}\`,
-        rows: field === "wording" ? Math.min(10, Math.max(3, (v[field] ?? "").split(\`
+        rows: field === "wording" ? Math.min(8, Math.max(3, (v[field] ?? "").split(\`
 \`).length + 1)) : 2,
         placeholder: copy.placeholder,
         "aria-label": copy.label,
@@ -4793,16 +6364,34 @@ td.st-adjudicated {
       });
       words.value = v[field] ?? "";
     }
-    return h("div", { class: "ruling" }, h("div", { class: "ruling-row" }, h("span", { class: "eyebrow" }, "Your ruling"), h("div", { class: "seg" }, VERDICT_KEYS.map(([k, key]) => h("button", {
-      class: \`vbtn v-\${k} \${v?.verdict === k ? "on" : ""}\`,
-      onclick: () => pickVerdict(it, k)
-    }, capitalize(verdictLabel(it, k)), h("kbd", {}, key)))), v ? h("button", {
+    const side = v?.verdict === "accept" || v?.verdict === "amend" ? "yes" : v?.verdict === "decline" ? "no" : "";
+    const consequence = (which, text) => h("button", {
+      class: \`conseq c-\${which} \${side === which ? "picked" : ""}\`,
+      tip: "Click to read it in full",
+      onclick: (e) => e.currentTarget.classList.toggle("full")
+    }, h("span", { class: "eyebrow" }, which === "yes" ? isChange(it) ? "If approved" : "If accepted" : isChange(it) ? "If rejected" : "If declined"), h("span", { class: "conseq-text" }, linked(text, ctx)));
+    const hasConseq = Boolean(a?.ifAccepted || a?.ifDeclined);
+    return h("div", {
+      class: \`ruling \${v ? \`ruled v-\${v.verdict}\` : "unruled"}\`,
+      role: "region",
+      "aria-label": "Your ruling"
+    }, hasConseq ? collapsible("Consequences", h("div", { class: "conseqs" }, a?.ifAccepted ? consequence("yes", a.ifAccepted) : null, a?.ifDeclined ? consequence("no", a.ifDeclined) : null), true, 0, "dock-consequences") : null, h("div", { class: "ruling-head" }, h("span", { class: "ruling-title" }, "Your ruling"), v ? h("span", { class: \`vchip v-\${v.verdict}\` }, \`✓ \${verdictLabel(it, v.verdict)}\`) : h("span", { class: "muted small" }, "not ruled yet"), a?.recommendation && !v ? h("span", { class: "muted small" }, \`· agent recommends \${verdictLabel(it, a.recommendation.verdict)}\`) : null, h("span", { class: "grow" }), v ? h("button", {
       class: "btn ghost sm",
+      tip: "Clear this ruling (u)",
       onclick: () => {
         setVerdict(it.id, null);
         render();
       }
-    }, "Clear", h("kbd", {}, "u")) : null, h("span", { class: "grow" }), h("button", { class: "btn ghost sm", title: "Next unreviewed (n)", onclick: nextUnreviewed }, "Next", h("kbd", {}, "n"))), words && field ? [h("label", { class: "lbl", for: "verdict-words" }, fieldCopy(it, field).label), words] : null, v ? h("input", {
+    }, "Clear", h("kbd", {}, "u")) : null, h("button", {
+      class: "btn ghost sm",
+      tip: "Go to the next item without a ruling (n)",
+      onclick: nextUnreviewed
+    }, "Next", h("kbd", {}, "n"))), h("div", { class: "verdicts" }, VERDICT_KEYS.map(([k, key]) => h("button", {
+      class: \`vbtn v-\${k} \${v?.verdict === k ? "on" : ""} \${a?.recommendation?.verdict === k ? "rec" : ""}\`,
+      "aria-pressed": v?.verdict === k ? "true" : "false",
+      tip: tips[k],
+      onclick: () => pickVerdict(it, k)
+    }, h("span", { class: "vb-mark" }, v?.verdict === k ? "✓" : ""), h("span", { class: "vb-label" }, capitalize(verdictLabel(it, k))), h("kbd", {}, key)))), words && field ? [h("label", { class: "lbl", for: "verdict-words" }, fieldCopy(it, field).label), words] : null, v ? h("input", {
       class: "field note-field",
       placeholder: "Note to the agent (optional)",
       value: v.note ?? "",
@@ -5016,7 +6605,7 @@ td.st-adjudicated {
       return h("td", { class: \`num st-\${s}\` }, h("span", { title: rs.map((r) => \`\${shortId(r.id)} — \${r.title}\`).join(\`
 \`) }, String(rs.length)));
     })))));
-    return h("main", { class: "page", "data-scroll": "dash" }, h("div", { class: "page-inner" }, h("h1", {}, "Spec-feedback across the repository"), h("p", { class: "lead" }, "Every SF in every design entry, by where it stands and by the intent slice it questions."), ledger.length === 0 ? h("p", { class: "muted" }, "The packet carries no ledger.") : null, h("div", { class: "cards" }, STATUSES.map((s) => h("div", { class: \`stat st-\${s}\` }, h("div", { class: "n" }, String(by(s).length)), h("div", { class: "l" }, s)))), ledger.length ? [h("h2", {}, "By intent slice"), matrix, h("h2", {}, "By status")] : null, STATUSES.filter((s) => by(s).length).map((s) => collapsible(\`\${capitalize(s)} · \${by(s).length}\`, h("table", { class: "list" }, h("tbody", {}, by(s).map((r) => h("tr", {}, h("td", { class: "nowrap" }, idCell(r)), h("td", {}, r.title), h("td", { class: "mono small muted" }, r.slices.map((x) => x.replace(/^intent\\//, "")).join(", ")))))), s === "pending" || s === "ruled"))));
+    return h("main", { class: "page", "data-scroll": "dash" }, h("div", { class: "page-inner" }, h("h1", {}, "Spec-feedback across the repository"), h("p", { class: "lead" }, "Every SF in every design entry, by where it stands and by the intent slice it questions."), ledger.length === 0 ? h("p", { class: "muted" }, "The packet carries no ledger.") : null, h("div", { class: "cards" }, STATUSES.map((s) => h("div", { class: \`stat st-\${s}\` }, h("div", { class: "n" }, String(by(s).length)), h("div", { class: "l" }, s)))), ledger.length ? [h("h2", {}, "By intent slice"), matrix, h("h2", {}, "By status")] : null, STATUSES.filter((s) => by(s).length).map((s) => collapsible(\`\${capitalize(s)} · \${by(s).length}\`, h("table", { class: "list" }, h("tbody", {}, by(s).map((r) => h("tr", {}, h("td", { class: "nowrap" }, idCell(r)), h("td", {}, linked(r.title, { entry: r.entry, dir: \`design/\${r.entry}\` })), h("td", { class: "mono small muted" }, r.slices.map((x) => x.replace(/^intent\\//, "")).join(", ")))))), s === "pending" || s === "ruled"))));
   }
   var OVERALL_COPY = {
     approve: ["Approve", "Ready to merge as far as intent and design go."],
@@ -5110,27 +6699,13 @@ td.st-adjudicated {
   function helpModal() {
     if (!S.help)
       return null;
-    const rows = [
-      ["j k", "Next / previous item (or file)"],
-      ["n", "Next unreviewed item"],
-      ["a m d f r", "Accept · amend · decline · defer · revise"],
-      ["u", "Clear the ruling"],
-      ["c q s", "Comment · question · suggest wording, on selected text"],
-      ["i x", "Intent here · mismatch with intent, on selected text"],
-      ["1 2 3 4", "Queue · files · dashboard · review & submit"],
-      ["p", "This session: every ruling and note"],
-      ["v", "Markdown as prose / as source"],
-      ["/", "Filter files"],
-      ["t", "Light / dark"],
-      ["⌘↵ Esc", "Confirm / leave a text field"]
-    ];
     return h("div", {
       class: "modal",
       onclick: () => {
         S.help = false;
         render();
       }
-    }, h("div", { class: "modal-box" }, h("div", { class: "modal-head" }, h("strong", {}, "Keyboard")), h("table", { class: "keys" }, h("tbody", {}, rows.map(([k, d]) => h("tr", {}, h("td", {}, k.split(" ").map((x) => h("kbd", {}, x))), h("td", {}, d)))))));
+    }, h("div", { class: "modal-box" }, h("div", { class: "modal-head" }, h("strong", {}, "Keyboard"), h("span", { class: "muted small" }, "More on the home page (1)")), keysTable()));
   }
   function go(v) {
     S.view = v;
@@ -5162,7 +6737,7 @@ td.st-adjudicated {
       root.replaceChildren(h("div", { class: "ended" }, h("div", { class: "ended-mark" }, "✓"), h("h1", {}, "Review ended"), h("p", {}, S.ended)));
       return;
     }
-    const body = S.view === "queue" ? queueView() : S.view === "files" ? filesView() : S.view === "dashboard" ? dashboardView() : submitView();
+    const body = S.view === "home" ? homeView() : S.view === "queue" ? queueView() : S.view === "files" ? filesView() : S.view === "dashboard" ? dashboardView() : submitView();
     const banner = S.banner ? h("div", { class: "banner" }, h("span", {}, S.banner), h("button", {
       class: "btn ghost sm",
       onclick: () => {
@@ -5170,7 +6745,7 @@ td.st-adjudicated {
         render();
       }
     }, "Dismiss")) : "";
-    root.replaceChildren(header(), banner, h("div", { class: \`main \${S.drawer ? "with-drawer" : ""}\` }, body, drawer() ?? ""), editorModal() ?? "", helpModal() ?? "");
+    root.replaceChildren(header(), banner, h("div", { class: \`main \${S.drawer ? "with-drawer" : ""}\` }, body, drawer() ?? ""), themePicker() ?? "", editorModal() ?? "", helpModal() ?? "");
     paintChrome();
     for (const el of root.querySelectorAll("[data-scroll]")) {
       const top = scrollMemo.get(el.dataset.scroll);
@@ -5201,15 +6776,6 @@ td.st-adjudicated {
     }
     pane.scrollTop = 0;
   }
-  function toggleTheme() {
-    const dark = matchMedia("(prefers-color-scheme: dark)").matches;
-    const cur = document.documentElement.dataset.theme ?? (dark ? "dark" : "light");
-    const next = cur === "dark" ? "light" : "dark";
-    document.documentElement.dataset.theme = next;
-    try {
-      localStorage.setItem("intent-review-theme", next);
-    } catch {}
-  }
   function toast(msg) {
     const t = h("div", { class: "toast" }, msg);
     document.body.append(t);
@@ -5235,9 +6801,10 @@ td.st-adjudicated {
       return;
     }
     if (e.key === "Escape") {
-      if (S.help || S.drawer) {
+      if (S.help || S.drawer || S.picker) {
         S.help = false;
         S.drawer = false;
+        S.picker = false;
         render();
       }
       hideToolbar();
@@ -5266,10 +6833,11 @@ td.st-adjudicated {
           render();
         }
       },
-      "1": () => go("queue"),
-      "2": () => go("files"),
-      "3": () => go("dashboard"),
-      "4": () => go("submit"),
+      "1": () => go("home"),
+      "2": () => go("queue"),
+      "3": () => go("files"),
+      "4": () => go("dashboard"),
+      "5": () => go("submit"),
       p: toggleDrawer,
       v: toggleRaw,
       "/": () => {
@@ -5277,7 +6845,10 @@ td.st-adjudicated {
           go("files");
         document.getElementById("file-filter")?.focus();
       },
-      t: toggleTheme,
+      t: () => {
+        S.picker = !S.picker;
+        render();
+      },
       "?": () => {
         S.help = !S.help;
         render();
@@ -5290,20 +6861,25 @@ td.st-adjudicated {
     }
   }
   async function boot() {
-    try {
-      const saved = localStorage.getItem("intent-review-theme");
-      if (saved === "dark" || saved === "light")
-        document.documentElement.dataset.theme = saved;
-    } catch {}
+    injectThemes(THEMES);
+    const systemDark = matchMedia("(prefers-color-scheme: dark)").matches;
+    applyTheme(systemDark ? DEFAULT_DARK : DEFAULT_LIGHT, false);
     const p = await api("GET", "/api/packet");
     if (p.status !== 200) {
       root.replaceChildren(h("div", { class: "ended" }, h("h1", {}, "Cannot load the review"), h("p", {}, "Open the exact URL the review tool printed — it carries the access token.")));
       return;
     }
     const d = await api("GET", "/api/draft");
+    const th = await api("GET", "/api/themes");
     const draft = d.data.draft;
     const packet = p.data.packet;
     FILES = new Map(packet.files.map((f) => [f.path, f.text]));
+    IDX = buildIndex(packet.files.map((f) => f.path), [...(packet.ledger ?? []).map((r) => r.id), ...packet.items.map((i) => i.id)], packet.items.map((i) => i.id));
+    injectThemes([...THEMES, ...th.data.themes ?? []]);
+    const known = (id) => !!id && [...THEMES, ...th.data.themes ?? []].some((t) => t.id === id);
+    const startTheme = known(th.data.initial) ? th.data.initial : known(th.data.prefs?.theme) ? th.data.prefs.theme : null;
+    if (startTheme)
+      applyTheme(startTheme, false);
     const restored = draft ? d.data.stale ? "Restored a draft made against a different version of this packet. Rulings and notes were kept — check them against the current items." : "Welcome back — your draft is restored." : null;
     S = {
       packet,
@@ -5314,7 +6890,7 @@ td.st-adjudicated {
         verdicts: (draft?.verdicts ?? []).filter((v) => packet.items.some((i) => i.id === v.item)),
         annotations: draft?.annotations ?? []
       },
-      view: "queue",
+      view: "home",
       current: 0,
       file: null,
       side: null,
@@ -5327,7 +6903,12 @@ td.st-adjudicated {
       banner: d.data.error ?? restored,
       errors: [],
       ended: null,
-      help: false
+      help: false,
+      theme: document.documentElement.dataset.theme ?? DEFAULT_LIGHT,
+      picker: false,
+      customThemes: th.data.themes ?? [],
+      themeDir: th.data.dir ?? null,
+      folds: loadFolds()
     };
     if (draft?.comment)
       S.review.comment = draft.comment;
@@ -5337,6 +6918,13 @@ td.st-adjudicated {
     applyHash();
     document.title = packet.title;
     document.addEventListener("keydown", onKey);
+    initTips();
+    document.addEventListener("mousedown", (e) => {
+      if (S.picker && !e.target.closest(".picker, .theme-btn")) {
+        S.picker = false;
+        render();
+      }
+    });
     document.addEventListener("mouseup", () => setTimeout(showToolbar, 0));
     document.addEventListener("keyup", (e) => {
       if (e.shiftKey)
@@ -5356,20 +6944,22 @@ td.st-adjudicated {
     const theme = q.get("theme");
     if (item) {
       const i = items().findIndex((x) => x.id === item);
-      if (i >= 0)
+      if (i >= 0) {
         S.current = i;
+        S.view = "queue";
+      }
     }
     if (file && FILES.has(file)) {
       S.view = "files";
       S.file = file;
       revealDir(file);
     }
-    if (view === "queue" || view === "files" || view === "dashboard" || view === "submit")
+    if (TABS.some(([v]) => v === view))
       S.view = view;
     if (q.has("drawer"))
       S.drawer = true;
-    if (theme === "dark" || theme === "light")
-      document.documentElement.dataset.theme = theme;
+    if (theme && allThemes().some((t) => t.id === theme))
+      applyTheme(theme, false);
   }
   boot().catch((e) => {
     root.textContent = \`The review page failed to start: \${e instanceof Error ? e.message : String(e)}\`;
@@ -5379,17 +6969,31 @@ td.st-adjudicated {
 </body>
 </html>
 `;
-  const handle = await serve(port === undefined ? { packet, digest, out, draft, html } : { packet, digest, out, draft, html, port });
-  io.out(`review: open ${handle.url}`);
-  io.out(`review: ${packet.items.length} items; draft autosaves to ${draft}`);
-  if (flags.open === true)
-    openBrowser(handle.url);
+  const config = configDir();
+  const themeDir = join3(config, "themes");
+  const { themes, initial } = loadThemes(themeDir, typeof flags.theme === "string" ? flags.theme : undefined, io);
+  const base = {
+    packet,
+    digest,
+    out,
+    draft,
+    html,
+    themes,
+    themeDir,
+    prefsPath: join3(config, "prefs.json")
+  };
+  const withTheme = initial === undefined ? base : { ...base, initialTheme: initial };
+  const handle = await serve(port === undefined ? withTheme : { ...withTheme, port });
   const abandon = () => {
     io.out(`review: abandoned — no decisions written; draft kept at ${draft}`);
     handle.close().finally(() => process.exit(3));
   };
   process.once("SIGINT", abandon);
   process.once("SIGTERM", abandon);
+  io.out(`review: open ${handle.url}`);
+  io.out(`review: ${packet.items.length} items; draft autosaves to ${draft}`);
+  if (flags.open === true)
+    openBrowser(handle.url);
   const outcome = await handle.done;
   process.off("SIGINT", abandon);
   process.off("SIGTERM", abandon);
@@ -5434,6 +7038,48 @@ function cmdLocate(flags, io) {
   });
   io.out(JSON.stringify(results, null, 2));
   return 0;
+}
+function configDir(env = process.env) {
+  if (env.INTENT_REVIEW_CONFIG)
+    return env.INTENT_REVIEW_CONFIG;
+  const xdg = env.XDG_CONFIG_HOME || join3(homedir(), ".config");
+  return join3(xdg, "intent-review");
+}
+function loadThemes(dir, flag, io) {
+  const themes = [];
+  const load = (path) => {
+    let raw;
+    try {
+      raw = JSON.parse(readFileSync3(path, "utf8"));
+    } catch {
+      io.err(`review: warning: theme ${path} is not readable JSON; skipped`);
+      return null;
+    }
+    const v = validateTheme(raw);
+    if (!v.ok) {
+      io.err(`review: warning: theme ${path} skipped:
+  ${v.errors.join(`
+  `)}`);
+      return null;
+    }
+    const t2 = resolveTheme(v.theme);
+    if (t2)
+      themes.push(t2);
+    return t2;
+  };
+  if (existsSync2(dir)) {
+    for (const name of readdirSync2(dir).sort())
+      if (name.endsWith(".json"))
+        load(join3(dir, name));
+  }
+  if (flag === undefined)
+    return { themes };
+  if (THEMES.some((t2) => t2.id === flag) || themes.some((t2) => t2.id === flag))
+    return { themes, initial: flag };
+  if (!existsSync2(flag))
+    throw new UsageError(`--theme: "${flag}" is neither a theme id nor a file`);
+  const t = load(flag);
+  return t ? { themes, initial: t.id } : { themes };
 }
 function openBrowser(url) {
   const [cmd, args] = process.platform === "darwin" ? ["open", [url]] : process.platform === "win32" ? ["cmd", ["/c", "start", '""', url]] : ["xdg-open", [url]];

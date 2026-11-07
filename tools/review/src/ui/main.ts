@@ -23,10 +23,20 @@ import {
   type Verdict,
   type VerdictKind,
 } from '../schema.ts';
+import { DEFAULT_DARK, DEFAULT_LIGHT, THEMES, type Theme, themeCss } from '../themes.ts';
 import { highlightLine, type Lang, langOf } from './highlight.ts';
-import { blocks, findSection, type Range, renderLines, type Segment, segment } from './source.ts';
+import {
+  blocks,
+  findSection,
+  inlineRanges,
+  type Range,
+  renderLines,
+  type Segment,
+  segment,
+} from './source.ts';
+import { buildIndex, entryOf, findRefs, type RefContext, type RefIndex } from './xref.ts';
 
-type View = 'queue' | 'files' | 'dashboard' | 'submit';
+type View = 'home' | 'queue' | 'files' | 'dashboard' | 'submit';
 type Focus = {
   path: string;
   quote?: string;
@@ -53,12 +63,18 @@ type State = {
   errors: ValidationError[];
   ended: string | null;
   help: boolean;
+  theme: string;
+  picker: boolean;
+  customThemes: Theme[];
+  themeDir: string | null;
+  folds: Record<string, boolean>;
 };
 
 const token = new URLSearchParams(location.search).get('token') ?? '';
 const root = document.getElementById('app') as HTMLElement;
 let S: State;
 let FILES = new Map<string, string>();
+let IDX: RefIndex = buildIndex([], []);
 
 // ---------------------------------------------------------------------------
 // DOM helper
@@ -72,7 +88,10 @@ function h(tag: string, attrs: Record<string, unknown> = {}, ...children: Child[
     if (k.startsWith('on') && typeof v === 'function') {
       el.addEventListener(k.slice(2), v as EventListener);
     } else if (k === 'class') el.className = String(v);
-    else if (k === 'value') (el as HTMLInputElement).value = String(v);
+    else if (k === 'tip') {
+      el.dataset.tip = String(v);
+      el.setAttribute('aria-description', String(v));
+    } else if (k === 'value') (el as HTMLInputElement).value = String(v);
     else el.setAttribute(k, v === true ? '' : String(v));
   }
   const add = (c: Child) => {
@@ -168,6 +187,11 @@ function verdictLabel(it: Item, v: VerdictKind): string {
 function shortId(id: string): string {
   const m = /^(\d{4})-[^/]*\/(SF-\d+)$/.exec(id);
   if (m) return `${m[1]} ${m[2]}`;
+  const adr = /(?:^|\/)decisions\/(\d{4})-/.exec(id);
+  if (adr) return `ADR ${adr[1]}`;
+  const entry = /^design\/(\d{4})-[^/]+$/.exec(id);
+  if (entry) return `entry ${entry[1]}`;
+  if (id.startsWith('intent-change/')) return id.split('/').pop() as string;
   return id.length > 40 ? `…${id.slice(-38)}` : id;
 }
 
@@ -271,25 +295,66 @@ type ViewOpts = {
   window?: { start: number; end: number };
   lines?: { start: number; end: number };
   compact?: boolean;
+  ctx?: RefContext;
 };
 
 function spanFor(s: Segment): HTMLElement {
   const span = h('span', { 'data-o': s.start, class: s.cls.join(' ') || undefined }, s.text);
+  const link = s.links[0];
+  if (link) {
+    span.dataset.link = link;
+    span.tabIndex = 0;
+    span.addEventListener('click', (e) => {
+      if (window.getSelection()?.isCollapsed) {
+        e.stopPropagation();
+        followLink(link);
+      }
+    });
+    span.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') followLink(link);
+    });
+    hoverPeek(span, () => linkCard(link));
+  }
   if (s.ids.length) {
     span.dataset.ann = s.ids.join(' ');
     span.title = s.ids
       .map((id) => S.review.annotations.find((a) => a.id === id)?.comment ?? '')
       .filter(Boolean)
       .join('\n—\n');
-    span.addEventListener('click', (e) => {
-      if (window.getSelection()?.isCollapsed) {
-        e.stopPropagation();
-        editAnnotation(s.ids[0] as string);
-      }
-    });
+    if (!link) {
+      span.addEventListener('click', (e) => {
+        if (window.getSelection()?.isCollapsed) {
+          e.stopPropagation();
+          editAnnotation(s.ids[0] as string);
+        }
+      });
+    }
   }
   return span;
 }
+
+function viewMarks(text: string, o: ViewOpts): Range[] {
+  return [
+    ...(o.target ? marksFor(o.target, text) : []),
+    ...(o.extra ?? []),
+    ...(o.ctx ? findRefs(text, IDX, o.ctx) : []),
+  ];
+}
+
+const fileCtx = (path: string): RefContext => {
+  const c: RefContext = { dir: path.split('/').slice(0, -1).join('/') };
+  const e = entryOf(path);
+  if (e) c.entry = e;
+  return c;
+};
+
+const itemCtx = (it: Item | undefined): RefContext => {
+  if (!it) return {};
+  const c = fileCtx(it.source.path);
+  const e = entryOf(it.id) ?? c.entry;
+  if (e) c.entry = e;
+  return c;
+};
 
 function annotatable(el: HTMLElement, t: AnnotationTarget | null | undefined): HTMLElement {
   if (!t) return el;
@@ -304,7 +369,7 @@ function annotatable(el: HTMLElement, t: AnnotationTarget | null | undefined): H
 }
 
 function proseView(text: string, o: ViewOpts = {}): HTMLElement {
-  const marks = [...(o.target ? marksFor(o.target, text) : []), ...(o.extra ?? [])];
+  const marks = viewMarks(text, o);
   const lines = renderLines(text, 'markdown', marks);
   const view = h('div', { class: `prose${o.compact ? ' compact' : ''}` });
   for (const b of blocks(lines, text)) {
@@ -329,7 +394,7 @@ function proseView(text: string, o: ViewOpts = {}): HTMLElement {
 }
 
 function codeView(text: string, lang: Lang, o: ViewOpts = {}): HTMLElement {
-  const marks = [...(o.target ? marksFor(o.target, text) : []), ...(o.extra ?? [])];
+  const marks = viewMarks(text, o);
   const lines = renderLines(text, lang, marks);
   const view = h('div', { class: `codeview lang-${lang}${o.compact ? ' compact' : ''}` });
   for (const line of lines) {
@@ -351,8 +416,9 @@ function fileView(path: string, o: ViewOpts = {}): HTMLElement {
   const text = fileText(path) ?? '';
   const lang = langOf(path);
   const target: AnnotationTarget = { kind: 'file', path };
-  if (lang === 'markdown' && !S.raw) return proseView(text, { ...o, target });
-  return codeView(text, lang, { ...o, target });
+  const ctx = fileCtx(path);
+  if (lang === 'markdown' && !S.raw) return proseView(text, { ...o, target, ctx });
+  return codeView(text, lang, { ...o, target, ctx });
 }
 
 /** An excerpt of a file around a ref — still annotatable against the file itself. */
@@ -368,7 +434,13 @@ function excerpt(r: Ref): HTMLElement | null {
     return h(
       'div',
       { class: 'excerpt' },
-      proseView(text, { target, extra: [focus], window: range, compact: true }),
+      proseView(text, {
+        target,
+        extra: [focus],
+        window: range,
+        compact: true,
+        ctx: fileCtx(r.path),
+      }),
     );
   }
   const a = lineOf(text, range.start);
@@ -378,6 +450,7 @@ function excerpt(r: Ref): HTMLElement | null {
     { class: 'excerpt' },
     codeView(text, lang, {
       target,
+      ctx: fileCtx(r.path),
       extra: [focus],
       lines: { start: Math.max(1, a - 2), end: b + 2 },
       compact: true,
@@ -387,16 +460,41 @@ function excerpt(r: Ref): HTMLElement | null {
 
 /** Item text (an SF's friction, etc.): prose, annotatable against the item. */
 function itemText(it: Item, key: string, text: string): HTMLElement {
-  return proseView(text, { target: { kind: 'item', item: it.id, section: key }, compact: true });
+  return proseView(text, {
+    target: { kind: 'item', item: it.id, section: key },
+    compact: true,
+    ctx: itemCtx(it),
+  });
 }
 
-const plainProse = (text: string) => proseView(text, { compact: true });
+/** Agent-written prose (analysis, summaries): read-only, identifiers linked. */
+const plainProse = (text: string, ctx: RefContext = itemCtx(currentItem())) =>
+  proseView(text, { compact: true, ctx });
 
+/** A plain string with its identifiers linked (titles, notes, table cells). */
+function linked(text: string, ctx: RefContext = itemCtx(currentItem())): HTMLElement {
+  const refs = findRefs(text, IDX, ctx);
+  return h(
+    'span',
+    {},
+    segment(text, 0, text.length, refs).map((sg) => spanFor(sg)),
+  );
+}
+
+/** A word diff of Markdown text: changes marked, emphasis styled, markers faint. */
 function wordDiff(before: string, after: string): HTMLElement {
+  const parts = diffWords(before, after);
+  const ops: Range[] = [];
+  let text = '';
+  for (const d of parts) {
+    ops.push({ start: text.length, end: text.length + d.text.length, cls: `w-${d.op}` });
+    text += d.text;
+  }
+  const segs = segment(text, 0, text.length, [...ops, ...inlineRanges(text)]);
   return h(
     'div',
     { class: 'wdiff' },
-    diffWords(before, after).map((d) => h('span', { class: `w-${d.op}` }, d.text)),
+    segs.map((sg) => h('span', { class: sg.cls.join(' ') || undefined }, sg.text)),
   );
 }
 
@@ -576,6 +674,53 @@ const ANN_HINT: Record<AnnotationKind, string> = {
   mismatch: 'How this diverges from the intent… (the agent reconciles the code or the intent)',
 };
 
+/** What each note asks of the agent — shown on hover and focus. */
+const ANN_TIP: Record<AnnotationKind, string> = {
+  comment:
+    'Comment — a remark for the agent to weigh. It may act on it or simply take note; no reply is owed. Use a question when you want an answer.',
+  question:
+    'Question — something you want answered. The agent replies (in its report, or as a new item next pass) before acting on it.',
+  suggestion:
+    'Suggest edit — replace the selected text with your own wording. The agent applies it through the normal review path.',
+  'intent-here':
+    'Intent here — say, in your words, what this passage is for: the purpose behind it that is written nowhere else (often code). The agent records it in intent/, or strengthens the slice that should already say it.',
+  mismatch:
+    'Mismatch — this does not do what the intent says. The agent works out whether the code or the intent should change, and brings that choice back to you.',
+};
+
+const VERDICT_TIP: Record<VerdictKind, string> = {
+  accept:
+    'Accept — the proposal is right. The agent makes the intent edit as proposed, in its own change for review.',
+  amend:
+    'Amend — right direction, your words. You write the wording; the agent makes the intent edit with it.',
+  decline:
+    'Decline — no change to the intent. Give a one-line why; it is recorded on the item as its disposition.',
+  defer:
+    'Defer — not now. Optionally record your ruling to apply later; otherwise the item simply stays open.',
+  revise:
+    'Revise — send it back. The agent reworks the proposal or analysis as you ask and shows it again next pass.',
+};
+
+const CHANGE_TIP: Record<VerdictKind, string> = {
+  accept: 'Approve — this change is right as it stands.',
+  amend: 'Amend — keep the change, in your wording. The agent applies it on the branch.',
+  decline:
+    'Reject — this change should not go in. Say why; the agent reverts or reworks it on the branch.',
+  defer: 'Defer — no ruling on this change yet.',
+  revise: 'Revise — the agent reworks this change as you ask and brings it back for another look.',
+};
+
+const VIEW_TIP: Record<View, string> = {
+  home: 'Home — what this review is, what you are asked to do, how to work through it, and the keys.',
+  queue:
+    'Queue — the items needing your ruling, one at a time, with the intent they touch beside them.',
+  files: 'Files — every file in the snapshot (intent, design, code), to read and to note anywhere.',
+  dashboard:
+    'Dashboard — every spec-feedback item in the repository, by status and by the intent slice it questions.',
+  submit:
+    'Review & submit — look over every ruling and note from this session, then hand them back to the agent.',
+};
+
 let editor: { annotation: Annotation; isNew: boolean } | null = null;
 
 function openEditor(kind: AnnotationKind): void {
@@ -712,6 +857,7 @@ function editorModal(): HTMLElement | null {
             'button',
             {
               class: `pill k-${k} ${a.kind === k ? 'on' : ''}`,
+              tip: ANN_TIP[k],
               onclick: () => {
                 a.kind = k;
                 if (k === 'suggestion' && a.suggestion === undefined) a.suggestion = quote;
@@ -745,7 +891,31 @@ function editorModal(): HTMLElement | null {
   );
 }
 
-// The floating toolbar over a selection.
+// ---------------------------------------------------------------------------
+// Popovers: the selection toolbar, peeks, and tooltips all stay inside the
+// viewport — placed above or below their anchor, flipped when there is no
+// room, and clamped to the edges.
+
+function placeNear(el: HTMLElement, anchor: DOMRect, prefer: 'above' | 'below'): void {
+  el.style.visibility = 'hidden';
+  el.style.top = '0px';
+  el.style.left = '0px';
+  document.body.append(el);
+  const w = el.offsetWidth;
+  const ht = el.offsetHeight;
+  const m = 8;
+  const above = anchor.top - ht - 6;
+  const below = anchor.bottom + 6;
+  let top = prefer === 'above' ? above : below;
+  if (prefer === 'above' && above < m) top = below;
+  if (prefer === 'below' && below + ht > window.innerHeight - m) top = above >= m ? above : below;
+  top = Math.max(m, Math.min(top, window.innerHeight - ht - m));
+  const left = Math.max(m, Math.min(anchor.left, window.innerWidth - w - m));
+  el.style.top = `${top}px`;
+  el.style.left = `${left}px`;
+  el.style.visibility = '';
+}
+
 let toolbarEl: HTMLElement | null = null;
 function hideToolbar(): void {
   toolbarEl?.remove();
@@ -757,18 +927,17 @@ function showToolbar(): void {
   const p = selectionTarget();
   const sel = window.getSelection();
   if (!p || !sel || sel.rangeCount === 0) return;
-  const rect = sel.getRangeAt(0).getBoundingClientRect();
+  const rects = sel.getRangeAt(0).getClientRects();
+  const rect = rects[0] ?? sel.getRangeAt(0).getBoundingClientRect();
   toolbarEl = h(
     'div',
-    {
-      class: 'toolbar',
-      style: `top:${Math.max(8, rect.top - 46)}px;left:${Math.max(8, Math.min(rect.left, window.innerWidth - 560))}px`,
-    },
+    { class: 'toolbar', role: 'toolbar', 'aria-label': 'Add a note' },
     ANN_KEYS.map(([k, key, label]) =>
       h(
         'button',
         {
           class: `tb k-${k}`,
+          tip: ANN_TIP[k],
           onmousedown: (e: Event) => e.preventDefault(),
           onclick: () => openEditor(k),
         },
@@ -777,25 +946,40 @@ function showToolbar(): void {
       ),
     ),
   );
-  document.body.append(toolbarEl);
+  placeNear(toolbarEl, rect, 'above');
 }
 
-// ---------------------------------------------------------------------------
-// Hover peek: a quick look at a referenced passage without navigating away.
+// Hover peeks: a quick look at a passage or an identifier without navigating away.
 
 let peekEl: HTMLElement | null = null;
 let peekTimer: ReturnType<typeof setTimeout> | undefined;
 
-function refLink(r: Ref | Focus, label: string, cls = ''): HTMLElement {
-  const el = h('button', { class: `ref ${cls}`, onclick: () => showBeside(r) }, label, icon('ext'));
-  el.addEventListener('mouseenter', () => {
+function hoverPeek(el: HTMLElement, build: () => HTMLElement | null): void {
+  const show = (delay: number) => {
     clearTimeout(peekTimer);
-    peekTimer = setTimeout(() => showPeek(el, r), 350);
-  });
-  el.addEventListener('mouseleave', () => {
+    peekTimer = setTimeout(() => {
+      const body = build();
+      if (!body) return;
+      hidePeek();
+      peekEl = body;
+      peekEl.addEventListener('mouseenter', () => clearTimeout(peekTimer));
+      peekEl.addEventListener('mouseleave', hidePeek);
+      placeNear(peekEl, el.getBoundingClientRect(), 'below');
+    }, delay);
+  };
+  const hide = () => {
     clearTimeout(peekTimer);
     peekTimer = setTimeout(hidePeek, 200);
-  });
+  };
+  el.addEventListener('mouseenter', () => show(350));
+  el.addEventListener('mouseleave', hide);
+  el.addEventListener('focus', () => show(150));
+  el.addEventListener('blur', hide);
+}
+
+function refLink(r: Ref | Focus, label: string, cls = ''): HTMLElement {
+  const el = h('button', { class: `ref ${cls}`, onclick: () => showBeside(r) }, label, icon('ext'));
+  hoverPeek(el, () => filePeek(r));
   return el;
 }
 
@@ -804,10 +988,9 @@ function hidePeek(): void {
   peekEl = null;
 }
 
-function showPeek(anchor: HTMLElement, r: Ref | Focus): void {
-  hidePeek();
+function filePeek(r: Ref | Focus): HTMLElement | null {
   const text = fileText(r.path);
-  if (text === undefined) return;
+  if (text === undefined) return null;
   const range = refRange(r, text);
   const at = range ? lineOf(text, range.start) : 1;
   const to = range ? lineOf(text, range.end) : 14;
@@ -816,18 +999,169 @@ function showPeek(anchor: HTMLElement, r: Ref | Focus): void {
     lines: { start: Math.max(1, at - 3), end: Math.min(to + 3, at + 30) },
     compact: true,
   });
-  const box = anchor.getBoundingClientRect();
-  const top = Math.min(window.innerHeight - 280, box.bottom + 6);
-  const left = Math.max(8, Math.min(window.innerWidth - 660, box.left));
-  peekEl = h(
+  return h('div', { class: 'peek' }, h('div', { class: 'peek-head mono' }, r.path), body);
+}
+
+/** Title, status, and first sentence of a Markdown document (or of one SF block). */
+function mdSummary(text: string): { title?: string; status?: string; summary?: string } {
+  const out: { title?: string; status?: string; summary?: string } = {};
+  const h1 = /^#{1,3}\s+(.+)$/m.exec(text);
+  if (h1) out.title = clean(h1[1] as string);
+  const st = /\*\*Status:\*\*\s*`?([^·\n`*]+)/.exec(text);
+  if (st) out.status = (st[1] as string).trim().replace(/[.,]$/, '');
+  for (const para of text.split(/\n\s*\n/)) {
+    const t = para.trim();
+    if (!t || /^#|^\||^```|^\s*>?\s*\*\*Status/.test(t)) continue;
+    const plain = clean(t.replace(/^>\s?/gm, '').replace(/^-\s+\*\*[^*]+:\*\*\s*/, ''));
+    if (plain.length < 12) continue;
+    const sentence = /^(.{20,}?[.!?])(\s|$)/.exec(plain)?.[1] ?? plain;
+    out.summary = sentence.length > 240 ? `${sentence.slice(0, 237)}…` : sentence;
+    break;
+  }
+  return out;
+}
+
+function clean(t: string): string {
+  return t
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/[`*_]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function sfBlock(path: string, sfId: string): string {
+  const text = fileText(path) ?? '';
+  const at = text.search(new RegExp(`^#{2,3}\\s+${sfId}\\b`, 'm'));
+  if (at < 0) return '';
+  const rest = text.slice(at);
+  const next = rest.slice(3).search(/^#{1,3}\s/m);
+  return next < 0 ? rest : rest.slice(0, next + 3);
+}
+
+type LinkTarget = {
+  label: string;
+  title?: string;
+  status?: string;
+  summary?: string;
+  focus?: Focus;
+  item?: number;
+};
+
+function resolveLink(link: string): LinkTarget | null {
+  const [kind, rest = ''] = [link.slice(0, link.indexOf(':')), link.slice(link.indexOf(':') + 1)];
+  if (kind === 'sf') {
+    const row = (S.packet.ledger ?? []).find((r) => r.id === rest);
+    const i = items().findIndex((x) => x.id === rest);
+    const it = items()[i];
+    const sfId = rest.split('/').pop() as string;
+    const path = row?.source.path ?? it?.source.path;
+    const friction = it?.sections.find((x) => x.key === 'friction')?.text;
+    const block = path ? sfBlock(path, sfId) : '';
+    const t: LinkTarget = { label: shortId(rest), title: row?.title ?? it?.title ?? sfId };
+    const status = row?.status ?? it?.status;
+    if (status) t.status = status;
+    const sum = mdSummary(friction ?? block.replace(/^#.*\n/, ''));
+    if (sum.summary) t.summary = sum.summary;
+    if (i >= 0) t.item = i;
+    if (path)
+      t.focus = {
+        path,
+        lines: {
+          start: row?.source.line ?? it?.source.line ?? 1,
+          end: row?.source.line ?? it?.source.line ?? 1,
+        },
+      };
+    return t;
+  }
+  const path =
+    kind === 'entry'
+      ? `${IDX.entries.get(rest)}/README.md`
+      : kind === 'adr'
+        ? IDX.adrs.get(rest)
+        : kind === 'file'
+          ? rest
+          : undefined;
+  if (!path || fileText(path) === undefined) return null;
+  const sum = mdSummary(fileText(path) ?? '');
+  const t: LinkTarget = {
+    label: kind === 'adr' ? `ADR ${rest}` : kind === 'entry' ? `Design entry ${rest}` : path,
+    focus: { path },
+  };
+  if (sum.title) t.title = sum.title;
+  if (sum.status) t.status = sum.status;
+  if (sum.summary) t.summary = sum.summary;
+  return t;
+}
+
+function linkCard(link: string): HTMLElement | null {
+  const t = resolveLink(link);
+  if (!t) return null;
+  return h(
     'div',
-    { class: 'peek', style: `top:${top}px;left:${left}px` },
-    h('div', { class: 'peek-head mono' }, r.path),
-    body,
+    { class: 'peek card-peek' },
+    h(
+      'div',
+      { class: 'cp-head' },
+      h('span', { class: 'mono' }, t.label),
+      t.status ? h('span', { class: `tag st-${t.status.split(' ')[0]}` }, t.status) : null,
+    ),
+    t.title ? h('div', { class: 'cp-title' }, t.title) : null,
+    t.summary ? h('div', { class: 'cp-sum' }, t.summary) : null,
+    h(
+      'div',
+      { class: 'cp-hint' },
+      t.item !== undefined ? 'Click to open this item' : 'Click to open',
+    ),
   );
-  peekEl.addEventListener('mouseenter', () => clearTimeout(peekTimer));
-  peekEl.addEventListener('mouseleave', hidePeek);
-  document.body.append(peekEl);
+}
+
+function followLink(link: string): void {
+  const t = resolveLink(link);
+  if (!t) return;
+  hidePeek();
+  if (t.item !== undefined) select(t.item);
+  else if (t.focus) showBeside(t.focus);
+}
+
+// Tooltips: every control explains itself after a pause (or at once on keyboard
+// focus) — not the native title, which is slow, unstyled, and unreachable by keyboard.
+
+let tipEl: HTMLElement | null = null;
+let tipTimer: ReturnType<typeof setTimeout> | undefined;
+let tipFor: HTMLElement | null = null;
+function hideTip(): void {
+  clearTimeout(tipTimer);
+  tipEl?.remove();
+  tipEl = null;
+  tipFor = null;
+}
+function initTips(): void {
+  const showFor = (el: HTMLElement, delay: number) => {
+    if (tipFor === el) return;
+    hideTip();
+    tipFor = el;
+    tipTimer = setTimeout(() => {
+      if (!el.isConnected) return;
+      tipEl = h('div', { class: 'tip', role: 'tooltip', id: 'tip' }, el.dataset.tip ?? '');
+      el.setAttribute('aria-describedby', 'tip');
+      placeNear(tipEl, el.getBoundingClientRect(), 'below');
+    }, delay);
+  };
+  document.addEventListener('mouseover', (e) => {
+    const el = (e.target as HTMLElement).closest?.('[data-tip]') as HTMLElement | null;
+    if (el) showFor(el, 700);
+  });
+  document.addEventListener('mouseout', (e) => {
+    const el = (e.target as HTMLElement).closest?.('[data-tip]');
+    if (el && !el.contains(e.relatedTarget as Node)) hideTip();
+  });
+  document.addEventListener('focusin', (e) => {
+    const el = (e.target as HTMLElement).closest?.('[data-tip]') as HTMLElement | null;
+    if (el?.matches(':focus-visible')) showFor(el, 150);
+  });
+  for (const ev of ['focusout', 'mousedown', 'keydown', 'scroll'] as const) {
+    document.addEventListener(ev, hideTip, true);
+  }
 }
 
 function showBeside(r: Ref | Focus): void {
@@ -848,26 +1182,29 @@ function showBeside(r: Ref | Focus): void {
 // ---------------------------------------------------------------------------
 // Header + session drawer
 
+const TABS: [View, string, string][] = [
+  ['home', 'Home', '1'],
+  ['queue', 'Queue', '2'],
+  ['files', 'Files', '3'],
+  ['dashboard', 'Dashboard', '4'],
+  ['submit', 'Review & submit', '5'],
+];
+
 function header(): HTMLElement {
   const p = S.packet;
-  const tabs: [View, string, string][] = [
-    ['queue', 'Queue', '1'],
-    ['files', 'Files', '2'],
-    ['dashboard', 'Dashboard', '3'],
-    ['submit', 'Review & submit', '4'],
-  ];
   const ruled = S.review.verdicts.length;
   const total = items().length;
   const sub =
     p.mode === 'branch' && p.change
       ? `${p.change.head.ref} → ${p.change.base.ref} · ${p.change.head.sha.slice(0, 7)}`
       : (p.repo.ref ?? p.repo.name);
+  const theme = allThemes().find((t) => t.id === S.theme);
   return h(
     'header',
     { class: 'top' },
     h(
-      'div',
-      { class: 'brand' },
+      'button',
+      { class: 'brand', onclick: () => go('home'), tip: 'Back to the home page (1)' },
       h('div', { class: 'title' }, p.title),
       h(
         'div',
@@ -880,11 +1217,11 @@ function header(): HTMLElement {
     ),
     h(
       'nav',
-      { class: 'tabs' },
-      tabs.map(([v, label, key]) =>
+      { class: 'tabs', 'aria-label': 'Views' },
+      TABS.map(([v, label, key]) =>
         h(
           'button',
-          { class: `tab ${S.view === v ? 'on' : ''}`, onclick: () => go(v) },
+          { class: `tab ${S.view === v ? 'on' : ''}`, onclick: () => go(v), tip: VIEW_TIP[v] },
           label,
           h('kbd', {}, key),
         ),
@@ -895,7 +1232,7 @@ function header(): HTMLElement {
       { class: 'status' },
       h(
         'div',
-        { class: 'meter', title: `${ruled} of ${total} ruled` },
+        { class: 'meter', tip: `${ruled} of ${total} items have your ruling` },
         h(
           'div',
           { class: 'track' },
@@ -908,24 +1245,390 @@ function header(): HTMLElement {
         'button',
         {
           class: `btn ghost sm ${S.drawer ? 'on' : ''}`,
-          title: 'Everything this session (p)',
+          tip: 'This session — every ruling and note so far; jump back to any of them, edit or remove them (p)',
           onclick: toggleDrawer,
         },
         'Session',
         h('span', { id: 'session-count', class: 'count' }, '0'),
       ),
-      h('button', { class: 'icon-btn', title: 'Light / dark (t)', onclick: toggleTheme }, '◐'),
       h(
         'button',
         {
-          class: 'icon-btn',
-          title: 'Keys (?)',
+          class: `btn ghost sm theme-btn ${S.picker ? 'on' : ''}`,
+          tip: 'Theme — choose the colours, or add your own (t)',
           onclick: () => {
-            S.help = !S.help;
+            S.picker = !S.picker;
             render();
           },
         },
-        '?',
+        h('span', { class: 'swatch', style: theme ? swatchStyle(theme) : '' }),
+        theme?.name ?? 'Theme',
+      ),
+    ),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Themes
+
+const THEME_DOCS =
+  'https://github.com/crumley/intent-architecture/blob/main/.agents/skills/intent-architecture/references/review-themes.md';
+
+const allThemes = (): Theme[] => [...THEMES, ...(S?.customThemes ?? [])];
+
+function swatchStyle(t: Theme): string {
+  const c = t.colors;
+  return `background:conic-gradient(${c.accent} 0 25%, ${c.heading} 0 50%, ${c.xref} 0 75%, ${c.surface} 0)`;
+}
+
+function injectThemes(list: Theme[]): void {
+  let el = document.getElementById('theme-css');
+  if (!el) {
+    el = document.createElement('style');
+    el.id = 'theme-css';
+    document.head.append(el);
+  }
+  el.textContent = list.map(themeCss).join('\n');
+}
+
+function applyTheme(id: string, save = true): void {
+  document.documentElement.dataset.theme = id;
+  if (S) S.theme = id;
+  if (save) api('PUT', '/api/prefs', { theme: id }).catch(() => undefined);
+}
+
+function themePicker(): HTMLElement | null {
+  if (!S.picker) return null;
+  const option = (t: Theme) =>
+    h(
+      'button',
+      {
+        class: `theme-opt ${t.id === S.theme ? 'on' : ''}`,
+        role: 'menuitemradio',
+        'aria-checked': t.id === S.theme ? 'true' : 'false',
+        onclick: () => {
+          applyTheme(t.id);
+          render();
+        },
+      },
+      h('span', { class: 'swatch big', style: swatchStyle(t) }),
+      h('span', { class: 'theme-name' }, t.name),
+      h('span', { class: 'muted small' }, t.dark ? 'dark' : 'light'),
+    );
+  return h(
+    'div',
+    { class: 'picker', role: 'menu', 'aria-label': 'Themes' },
+    h('div', { class: 'eyebrow' }, 'Themes'),
+    THEMES.map(option),
+    S.customThemes.length
+      ? [h('div', { class: 'eyebrow' }, 'Yours'), S.customThemes.map(option)]
+      : null,
+    h(
+      'div',
+      { class: 'picker-foot small' },
+      'Make your own: a small JSON file naming a base theme and the colours to change, placed in ',
+      h('span', { class: 'mono' }, S.themeDir ?? '~/.config/intent-review/themes'),
+      ' or passed with ',
+      h('span', { class: 'mono' }, '--theme'),
+      '. ',
+      h(
+        'a',
+        { href: THEME_DOCS, target: '_blank', rel: 'noopener noreferrer' },
+        'How to write a theme ↗',
+      ),
+    ),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Session-scoped fold state: a section opened or closed stays that way for the
+// rest of the sitting, across items.
+
+function loadFolds(): Record<string, boolean> {
+  try {
+    return JSON.parse(sessionStorage.getItem('intent-review-folds') ?? '{}') as Record<
+      string,
+      boolean
+    >;
+  } catch {
+    return {};
+  }
+}
+
+function saveFolds(): void {
+  try {
+    sessionStorage.setItem('intent-review-folds', JSON.stringify(S.folds));
+  } catch {
+    // no session storage: folds still hold for this page
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Home: where a review starts — what it is, what is asked, how to work it.
+
+function homeView(): HTMLElement {
+  const p = S.packet;
+  const its = items();
+  const count = (f: (i: Item) => boolean) => its.filter(f).length;
+  const firstOf = (f: (i: Item) => boolean) => {
+    const order = displayOrder();
+    const i =
+      order.find((n) => f(its[n] as Item) && !verdictOf((its[n] as Item).id)) ??
+      order.find((n) => f(its[n] as Item));
+    return i;
+  };
+  const asks: [string, string, (i: Item) => boolean][] = [
+    [
+      'Spec-feedback to rule on',
+      'Frictions a build found in the intent, each with a proposed revision.',
+      (i) => i.kind === 'sf' && i.status !== 'ruled',
+    ],
+    [
+      'Rulings awaiting their wording',
+      'Already ruled; confirm the words that land the ruling in the intent.',
+      (i) => i.kind === 'sf' && i.status === 'ruled',
+    ],
+    [
+      'Open questions',
+      'Cross-cutting questions the intent tracks as unresolved.',
+      (i) => i.kind === 'question',
+    ],
+    [
+      'Decisions still proposed',
+      'Design decisions (ADRs) nobody has taken yet.',
+      (i) => i.kind === 'decision',
+    ],
+    [
+      'Intent changes',
+      'Edits this branch makes to the intent itself.',
+      (i) => i.kind === 'intent-change',
+    ],
+    [
+      'Design entries',
+      'Design entries this branch adds or changes.',
+      (i) => i.kind === 'design-entry',
+    ],
+    [
+      'Findings',
+      'Things an agent noticed that need your judgment.',
+      (i) => !['sf', 'question', 'decision', 'intent-change', 'design-entry'].includes(i.kind),
+    ],
+  ];
+  const ruled = S.review.verdicts.length;
+  const next = displayOrder().find((n) => !verdictOf((its[n] as Item).id));
+  const intro = p.mode === 'branch' && p.change ? p.change.summary : p.intro;
+  return h(
+    'main',
+    { class: 'page home', 'data-scroll': 'home' },
+    h(
+      'div',
+      { class: 'page-inner narrow' },
+      h(
+        'div',
+        { class: 'eyebrow' },
+        p.mode === 'branch' ? 'Branch review' : 'Review of the main line',
+      ),
+      h('h1', { class: 'home-title' }, p.title),
+      h(
+        'p',
+        { class: 'lead' },
+        p.mode === 'branch' && p.change
+          ? `What ${p.change.head.ref} does to the intent and design, measured against ${p.change.base.ref} — so you can decide before it merges. Rule on each change, then give the branch an overall verdict.`
+          : 'Everything in this repository that is waiting on a human decision: rule on each item, note anything you see along the way, then hand it back. An agent prepared this and carries out what you decide.',
+      ),
+      intro || p.change?.recommendation
+        ? h(
+            'div',
+            { class: 'rec-card' },
+            h(
+              'div',
+              { class: 'rec-head' },
+              h('span', { class: 'eyebrow' }, 'The agent’s overview'),
+              p.change?.recommendation
+                ? h(
+                    'span',
+                    { class: `vchip big o-${p.change.recommendation.verdict}` },
+                    p.change.recommendation.verdict,
+                  )
+                : null,
+            ),
+            intro ? plainProse(intro, {}) : null,
+            p.change?.recommendation
+              ? h('p', { class: 'rec-why' }, p.change.recommendation.why)
+              : null,
+          )
+        : null,
+      h('h2', {}, 'What you are asked to do'),
+      h(
+        'div',
+        { class: 'asks' },
+        asks
+          .filter(([, , f]) => count(f) > 0)
+          .map(([label, desc, f]) => {
+            const n = count(f);
+            const done = its.filter((i) => f(i) && verdictOf(i.id)).length;
+            const first = firstOf(f);
+            return h(
+              'button',
+              { class: 'ask', onclick: () => first !== undefined && select(first) },
+              h('span', { class: 'ask-n' }, String(n)),
+              h(
+                'span',
+                { class: 'ask-body' },
+                h('strong', {}, label),
+                h('span', { class: 'muted small' }, desc),
+              ),
+              h('span', { class: 'ask-done small muted' }, done ? `${done} ruled` : ''),
+            );
+          }),
+        p.mode === 'branch'
+          ? h(
+              'button',
+              { class: 'ask', onclick: () => go('submit') },
+              h('span', { class: 'ask-n' }, '1'),
+              h(
+                'span',
+                { class: 'ask-body' },
+                h('strong', {}, 'Overall verdict'),
+                h(
+                  'span',
+                  { class: 'muted small' },
+                  'Approve, request changes, or comment — given on Review & submit.',
+                ),
+              ),
+              h(
+                'span',
+                { class: 'ask-done small muted' },
+                S.review.overall ? S.review.overall.verdict : '',
+              ),
+            )
+          : null,
+      ),
+      h(
+        'div',
+        { class: 'row cta' },
+        h(
+          'button',
+          {
+            class: 'btn primary big',
+            onclick: () => (next !== undefined ? select(next) : go('submit')),
+          },
+          ruled === 0
+            ? 'Start reviewing →'
+            : next !== undefined
+              ? 'Continue reviewing →'
+              : 'Review & submit →',
+        ),
+        h(
+          'span',
+          { class: 'muted small' },
+          `${ruled} of ${its.length} ruled · ${S.review.annotations.length} notes · your work saves as you go`,
+        ),
+      ),
+      h('h2', {}, 'How to go through it'),
+      h(
+        'ol',
+        { class: 'steps' },
+        h(
+          'li',
+          {},
+          h('strong', {}, 'Work the queue. '),
+          'Each item opens with the agent’s recommendation and summary, then the proposed change. Supporting detail — the friction, the assumption, the slice — is folded away until you want it. The intent the item touches is shown beside it.',
+        ),
+        h(
+          'li',
+          {},
+          h('strong', {}, 'Rule at the foot of the item. '),
+          'The consequences of each choice sit above the five rulings. Hover any ruling to see exactly what it asks of the agent.',
+        ),
+        h(
+          'li',
+          {},
+          h('strong', {}, 'Note anything, anywhere. '),
+          'Select text — in an item, in the intent, in code — and a small toolbar offers five kinds of note.',
+        ),
+        h(
+          'li',
+          {},
+          h('strong', {}, 'Follow the identifiers. '),
+          'SF numbers, entry numbers like 0031, ADRs, and file paths are links: hover to peek, click to go.',
+        ),
+        h(
+          'li',
+          {},
+          h('strong', {}, 'Hand it back. '),
+          'On Review & submit, check the list and submit. The agent carries everything out and may come back with a smaller packet.',
+        ),
+      ),
+      h('h2', {}, 'The views'),
+      h(
+        'div',
+        { class: 'cards3' },
+        TABS.filter(([v]) => v !== 'home').map(([v, label, key]) =>
+          h(
+            'button',
+            { class: 'card view-card', onclick: () => go(v) },
+            h('div', { class: 'row' }, h('strong', {}, label), h('kbd', {}, key)),
+            h('p', { class: 'small muted' }, VIEW_TIP[v].replace(/^[^—]+— /, '')),
+          ),
+        ),
+      ),
+      h('h2', {}, 'Your rulings'),
+      h(
+        'dl',
+        { class: 'defs' },
+        VERDICT_KEYS.map(([k, key]) => [
+          h('dt', {}, h('span', { class: `vchip v-${k}` }, k), h('kbd', {}, key)),
+          h('dd', {}, VERDICT_TIP[k].replace(/^[^—]+— /, '')),
+        ]),
+      ),
+      h('h2', {}, 'Kinds of note'),
+      h(
+        'dl',
+        { class: 'defs' },
+        ANN_KEYS.map(([k, key, label]) => [
+          h('dt', {}, h('span', { class: `pill k-${k}` }, label), h('kbd', {}, key)),
+          h('dd', {}, ANN_TIP[k].replace(/^[^—]+— /, '')),
+        ]),
+      ),
+      h('h2', {}, 'Keyboard'),
+      keysTable(),
+    ),
+  );
+}
+
+function keysTable(): HTMLElement {
+  const rows: [string, string][] = [
+    ['1 2 3 4 5', 'Home · queue · files · dashboard · review & submit'],
+    ['j k', 'Next / previous item (or file)'],
+    ['n', 'Next unreviewed item'],
+    ['a m d f r', 'Accept · amend · decline · defer · revise'],
+    ['u', 'Clear the ruling'],
+    ['c q s i x', 'Comment · question · suggest · intent here · mismatch — on selected text'],
+    ['p', 'This session: every ruling and note'],
+    ['v', 'Markdown as prose / as source'],
+    ['/', 'Filter files'],
+    ['t', 'Themes'],
+    ['?', 'This list'],
+    ['⌘↵ Esc', 'Confirm / leave a text field'],
+  ];
+  return h(
+    'table',
+    { class: 'keys' },
+    h(
+      'tbody',
+      {},
+      rows.map(([k, d]) =>
+        h(
+          'tr',
+          {},
+          h(
+            'td',
+            {},
+            k.split(' ').map((x) => h('kbd', {}, x)),
+          ),
+          h('td', {}, d),
+        ),
       ),
     ),
   );
@@ -1127,7 +1830,6 @@ function queueRow(it: Item, i: number): HTMLElement {
 
 function queueNav(): HTMLElement {
   const order = displayOrder();
-  const c = S.packet.change;
   const list =
     S.packet.mode === 'branch'
       ? GROUPS.map(([g, label]) => {
@@ -1146,35 +1848,12 @@ function queueNav(): HTMLElement {
       : order.map((i) => queueRow(items()[i] as Item, i));
   return h(
     'aside',
-    { class: 'nav', 'data-scroll': 'nav' },
-    S.packet.mode === 'branch' && c
-      ? h(
-          'div',
-          { class: 'overview' },
-          h(
-            'div',
-            { class: 'row' },
-            h('span', { class: 'eyebrow' }, 'The agent’s read'),
-            c.recommendation
-              ? h(
-                  'span',
-                  { class: `vchip o-${c.recommendation.verdict}` },
-                  c.recommendation.verdict,
-                )
-              : null,
-          ),
-          c.summary ? plainProse(c.summary) : null,
-          c.recommendation ? h('p', { class: 'small muted' }, c.recommendation.why) : null,
-        )
-      : null,
-    S.packet.intro
-      ? h(
-          'details',
-          { class: 'overview', open: true },
-          h('summary', { class: 'eyebrow' }, 'About this review'),
-          plainProse(S.packet.intro),
-        )
-      : null,
+    { class: 'nav', 'data-scroll': 'nav', 'aria-label': 'Items' },
+    h(
+      'button',
+      { class: 'nav-home small', onclick: () => go('home'), tip: VIEW_TIP.home },
+      '← What this review is about',
+    ),
     items().length === 0
       ? h('p', { class: 'muted pad' }, 'Nothing to review in this packet.')
       : null,
@@ -1195,7 +1874,19 @@ function queueView(): HTMLElement {
   );
 }
 
-const COLLAPSED = new Set(['slice', 'entry-context']);
+/**
+ * Progressive disclosure: the summary, the proposal, the analysis, and the
+ * ruling are open; an SF's supporting fields start folded. Any fold the
+ * reviewer opens or closes stays that way for the session (by section key).
+ */
+const FOLDED_BY_DEFAULT = new Set([
+  'slice',
+  'friction',
+  'assumption',
+  'revision',
+  'entry-context',
+  'notes',
+]);
 
 function itemDetail(it: Item): HTMLElement {
   const v = verdictOf(it.id);
@@ -1204,6 +1895,7 @@ function itemDetail(it: Item): HTMLElement {
   const sections = it.sections.filter((s) => s.key !== 'on-branch');
   const onBranch = it.sections.find((s) => s.key === 'on-branch');
   const notes = annotationsForItem(it.id);
+  const ctx = itemCtx(it);
   const sourceRef = { path: it.source.path, lines: { start: it.source.line, end: it.source.line } };
   const doc = h(
     'div',
@@ -1226,13 +1918,13 @@ function itemDetail(it: Item): HTMLElement {
         ? refLink(sourceRef, `${it.source.path}:${it.source.line}`, 'quiet')
         : h('span', { class: 'mono small muted' }, `${it.source.path}:${it.source.line}`),
     ),
-    h('h1', { class: 'item-title' }, it.title),
-    onBranch ? h('div', { class: 'callout info' }, onBranch.text) : null,
+    h('h1', { class: 'item-title' }, linked(it.title, ctx)),
+    onBranch ? h('div', { class: 'callout info' }, linked(onBranch.text, ctx)) : null,
     it.statusLine && (it.status === 'ruled' || it.baseStatusLine !== undefined)
-      ? h('div', { class: 'callout warn' }, h('strong', {}, 'Status '), it.statusLine)
+      ? h('div', { class: 'callout warn' }, h('strong', {}, 'Status '), linked(it.statusLine, ctx))
       : null,
     it.baseStatusLine
-      ? h('div', { class: 'callout' }, h('strong', {}, 'At base '), it.baseStatusLine)
+      ? h('div', { class: 'callout' }, h('strong', {}, 'At base '), linked(it.baseStatusLine, ctx))
       : null,
     rec || a?.summary
       ? h(
@@ -1245,53 +1937,18 @@ function itemDetail(it: Item): HTMLElement {
             rec
               ? h(
                   'span',
-                  { class: `vchip big v-${rec.verdict}` },
+                  {
+                    class: `vchip big v-${rec.verdict}`,
+                    tip: (isChange(it) ? CHANGE_TIP : VERDICT_TIP)[rec.verdict],
+                  },
                   capitalize(verdictLabel(it, rec.verdict)),
                 )
               : null,
           ),
-          rec ? h('p', { class: 'rec-why' }, rec.why) : null,
-          a?.summary ? plainProse(a.summary) : null,
+          rec ? h('p', { class: 'rec-why' }, linked(rec.why, ctx)) : null,
+          a?.summary ? plainProse(a.summary, ctx) : null,
         )
       : null,
-    it.evidence.length
-      ? h(
-          'section',
-          { class: 'sec' },
-          h(
-            'h2',
-            {},
-            it.kind === 'sf' || it.kind === 'question' ? 'The intent in question' : 'Evidence',
-          ),
-          it.evidence.map((r) => {
-            const text = fileText(r.path);
-            const missing = r.quote && text !== undefined && !text.includes(r.quote);
-            return h(
-              'div',
-              { class: 'evidence' },
-              h(
-                'div',
-                { class: 'ev-head' },
-                refLink(r, refLabel(r)),
-                r.section ? h('span', { class: 'muted small' }, `§ ${r.section}`) : null,
-                missing
-                  ? h('span', { class: 'warn small' }, 'quote not found in the snapshot')
-                  : null,
-              ),
-              r.note ? h('p', { class: 'small muted' }, r.note) : null,
-              excerpt(r),
-            );
-          }),
-        )
-      : null,
-    sections.map((s) =>
-      collapsible(
-        s.label,
-        itemText(it, s.key, s.text),
-        !COLLAPSED.has(s.key),
-        annotationsOn({ kind: 'item', item: it.id, section: s.key }).length,
-      ),
-    ),
     it.proposal ? proposalSection(it) : null,
     it.changes?.length
       ? h(
@@ -1314,34 +1971,9 @@ function itemDetail(it: Item): HTMLElement {
                 ? h('div', { class: 'added-doc' }, fileView(c.path))
                 : patchView(c),
               c.patch.split('\n').length < 160,
+              0,
+              `change:${c.path}`,
             ),
-          ),
-        )
-      : null,
-    a && (a.ifAccepted || a.ifDeclined)
-      ? h(
-          'section',
-          { class: 'sec' },
-          h('h2', {}, 'Consequences'),
-          h(
-            'div',
-            { class: 'two' },
-            a.ifAccepted
-              ? h(
-                  'div',
-                  { class: 'card' },
-                  h('div', { class: 'eyebrow' }, isChange(it) ? 'If approved' : 'If accepted'),
-                  plainProse(a.ifAccepted),
-                )
-              : null,
-            a.ifDeclined
-              ? h(
-                  'div',
-                  { class: 'card' },
-                  h('div', { class: 'eyebrow' }, isChange(it) ? 'If rejected' : 'If declined'),
-                  plainProse(a.ifDeclined),
-                )
-              : null,
           ),
         )
       : null,
@@ -1365,7 +1997,7 @@ function itemDetail(it: Item): HTMLElement {
                   },
                   shortId(r.item),
                 ),
-                h('span', {}, r.note),
+                h('span', {}, linked(r.note, ctx)),
               ),
             ),
           ),
@@ -1374,23 +2006,69 @@ function itemDetail(it: Item): HTMLElement {
     !a && !isChange(it)
       ? h('p', { class: 'muted small sec' }, 'The packet carries no analysis for this item.')
       : null,
-    notes.length
+    it.evidence.length
+      ? collapsible(
+          it.kind === 'sf' || it.kind === 'question' ? 'The intent in question' : 'Evidence',
+          h(
+            'div',
+            {},
+            it.evidence.map((r) => {
+              const text = fileText(r.path);
+              const missing = r.quote && text !== undefined && !text.includes(r.quote);
+              return h(
+                'div',
+                { class: 'evidence' },
+                h(
+                  'div',
+                  { class: 'ev-head' },
+                  refLink(r, refLabel(r)),
+                  r.section ? h('span', { class: 'muted small' }, `§ ${r.section}`) : null,
+                  missing
+                    ? h('span', { class: 'warn small' }, 'quote not found in the snapshot')
+                    : null,
+                ),
+                r.note ? h('p', { class: 'small muted' }, linked(r.note, ctx)) : null,
+                excerpt(r),
+              );
+            }),
+          ),
+          true,
+          0,
+          'evidence',
+        )
+      : null,
+    sections.length
       ? h(
-          'section',
-          { class: 'sec' },
-          h('h2', {}, `Your notes on this item · ${notes.length}`),
+          'div',
+          { class: 'supporting' },
+          h(
+            'div',
+            { class: 'eyebrow' },
+            it.kind === 'sf' ? 'The spec-feedback as written' : 'Detail',
+          ),
+          sections.map((s) =>
+            collapsible(
+              s.label,
+              itemText(it, s.key, s.text),
+              !FOLDED_BY_DEFAULT.has(s.key),
+              annotationsOn({ kind: 'item', item: it.id, section: s.key }).length,
+              `sec:${s.key}`,
+            ),
+          ),
+        )
+      : null,
+    notes.length
+      ? collapsible(
+          `Your notes on this item · ${notes.length}`,
           noteList(notes),
+          true,
+          0,
+          'item-notes',
         )
       : h(
           'p',
           { class: 'hint' },
-          'Select any text — here, in an excerpt, or in the file beside — then press ',
-          h('kbd', {}, 'c'),
-          ' to comment, ',
-          h('kbd', {}, 's'),
-          ' to suggest wording, or ',
-          h('kbd', {}, 'i'),
-          ' to say what the intent is.',
+          'Select any text — here, in an excerpt, or in the file beside — to leave a note. Hover a note kind to see what it asks of the agent.',
         ),
   );
   return h('main', { class: 'center', 'data-scroll': `detail:${it.id}` }, doc, rulingBar(it, v));
@@ -1398,11 +2076,12 @@ function itemDetail(it: Item): HTMLElement {
 
 function proposalSection(it: Item): HTMLElement {
   const pr = it.proposal as NonNullable<Item['proposal']>;
+  const ctx = itemCtx(it);
   return h(
     'section',
     { class: 'sec' },
     h('h2', {}, 'Proposed edit'),
-    pr.summary ? h('p', { class: 'lead' }, pr.summary) : null,
+    pr.summary ? h('p', { class: 'lead' }, linked(pr.summary, ctx)) : null,
     pr.edits.map((e) => {
       const text = fileText(e.path) ?? '';
       const at = text.indexOf(e.before);
@@ -1431,10 +2110,12 @@ function collapsible(
   body: HTMLElement,
   open: boolean,
   count = 0,
+  key?: string,
 ): HTMLElement {
-  return h(
+  const isOpen = key !== undefined && key in S.folds ? (S.folds[key] as boolean) : open;
+  const el = h(
     'details',
-    { class: 'sec fold', open: open ? true : undefined },
+    { class: 'sec fold', open: isOpen ? true : undefined },
     h(
       'summary',
       {},
@@ -1444,6 +2125,13 @@ function collapsible(
     ),
     body,
   );
+  if (key !== undefined) {
+    el.addEventListener('toggle', () => {
+      S.folds[key] = (el as HTMLDetailsElement).open;
+      saveFolds();
+    });
+  }
+  return el;
 }
 
 function noteList(list: Annotation[]): HTMLElement {
@@ -1511,9 +2199,16 @@ function fieldCopy(it: Item, field: string): { label: string; placeholder: strin
   }
 }
 
+/**
+ * The ruling dock, pinned to the foot of the item: the consequences of each
+ * choice, then the five rulings — the page's call to action.
+ */
 function rulingBar(it: Item, v: Verdict | undefined): HTMLElement {
   const field = v ? (v.verdict === 'defer' ? 'ruling' : REQUIRED_WORDS[v.verdict]) : null;
   const blur = () => (document.activeElement as HTMLElement | null)?.blur();
+  const a = it.analysis;
+  const ctx = itemCtx(it);
+  const tips = isChange(it) ? CHANGE_TIP : VERDICT_TIP;
   let words: HTMLTextAreaElement | null = null;
   if (v && field) {
     const copy = fieldCopy(it, field);
@@ -1521,9 +2216,7 @@ function rulingBar(it: Item, v: Verdict | undefined): HTMLElement {
       id: 'verdict-words',
       class: `field ${field === 'wording' ? 'mono' : ''}`,
       rows:
-        field === 'wording'
-          ? Math.min(10, Math.max(3, (v[field] ?? '').split('\n').length + 1))
-          : 2,
+        field === 'wording' ? Math.min(8, Math.max(3, (v[field] ?? '').split('\n').length + 1)) : 2,
       placeholder: copy.placeholder,
       'aria-label': copy.label,
       oninput: (e: Event) => {
@@ -1534,33 +2227,76 @@ function rulingBar(it: Item, v: Verdict | undefined): HTMLElement {
     }) as HTMLTextAreaElement;
     words.value = v[field] ?? '';
   }
+  const side =
+    v?.verdict === 'accept' || v?.verdict === 'amend'
+      ? 'yes'
+      : v?.verdict === 'decline'
+        ? 'no'
+        : '';
+  const consequence = (which: 'yes' | 'no', text: string) =>
+    h(
+      'button',
+      {
+        class: `conseq c-${which} ${side === which ? 'picked' : ''}`,
+        tip: 'Click to read it in full',
+        onclick: (e: Event) => (e.currentTarget as HTMLElement).classList.toggle('full'),
+      },
+      h(
+        'span',
+        { class: 'eyebrow' },
+        which === 'yes'
+          ? isChange(it)
+            ? 'If approved'
+            : 'If accepted'
+          : isChange(it)
+            ? 'If rejected'
+            : 'If declined',
+      ),
+      h('span', { class: 'conseq-text' }, linked(text, ctx)),
+    );
+  const hasConseq = Boolean(a?.ifAccepted || a?.ifDeclined);
   return h(
     'div',
-    { class: 'ruling' },
+    {
+      class: `ruling ${v ? `ruled v-${v.verdict}` : 'unruled'}`,
+      role: 'region',
+      'aria-label': 'Your ruling',
+    },
+    hasConseq
+      ? collapsible(
+          'Consequences',
+          h(
+            'div',
+            { class: 'conseqs' },
+            a?.ifAccepted ? consequence('yes', a.ifAccepted) : null,
+            a?.ifDeclined ? consequence('no', a.ifDeclined) : null,
+          ),
+          true,
+          0,
+          'dock-consequences',
+        )
+      : null,
     h(
       'div',
-      { class: 'ruling-row' },
-      h('span', { class: 'eyebrow' }, 'Your ruling'),
-      h(
-        'div',
-        { class: 'seg' },
-        VERDICT_KEYS.map(([k, key]) =>
-          h(
-            'button',
-            {
-              class: `vbtn v-${k} ${v?.verdict === k ? 'on' : ''}`,
-              onclick: () => pickVerdict(it, k),
-            },
-            capitalize(verdictLabel(it, k)),
-            h('kbd', {}, key),
-          ),
-        ),
-      ),
+      { class: 'ruling-head' },
+      h('span', { class: 'ruling-title' }, 'Your ruling'),
+      v
+        ? h('span', { class: `vchip v-${v.verdict}` }, `✓ ${verdictLabel(it, v.verdict)}`)
+        : h('span', { class: 'muted small' }, 'not ruled yet'),
+      a?.recommendation && !v
+        ? h(
+            'span',
+            { class: 'muted small' },
+            `· agent recommends ${verdictLabel(it, a.recommendation.verdict)}`,
+          )
+        : null,
+      h('span', { class: 'grow' }),
       v
         ? h(
             'button',
             {
               class: 'btn ghost sm',
+              tip: 'Clear this ruling (u)',
               onclick: () => {
                 setVerdict(it.id, null);
                 render();
@@ -1570,12 +2306,33 @@ function rulingBar(it: Item, v: Verdict | undefined): HTMLElement {
             h('kbd', {}, 'u'),
           )
         : null,
-      h('span', { class: 'grow' }),
       h(
         'button',
-        { class: 'btn ghost sm', title: 'Next unreviewed (n)', onclick: nextUnreviewed },
+        {
+          class: 'btn ghost sm',
+          tip: 'Go to the next item without a ruling (n)',
+          onclick: nextUnreviewed,
+        },
         'Next',
         h('kbd', {}, 'n'),
+      ),
+    ),
+    h(
+      'div',
+      { class: 'verdicts' },
+      VERDICT_KEYS.map(([k, key]) =>
+        h(
+          'button',
+          {
+            class: `vbtn v-${k} ${v?.verdict === k ? 'on' : ''} ${a?.recommendation?.verdict === k ? 'rec' : ''}`,
+            'aria-pressed': v?.verdict === k ? 'true' : 'false',
+            tip: tips[k],
+            onclick: () => pickVerdict(it, k),
+          },
+          h('span', { class: 'vb-mark' }, v?.verdict === k ? '✓' : ''),
+          h('span', { class: 'vb-label' }, capitalize(verdictLabel(it, k))),
+          h('kbd', {}, key),
+        ),
       ),
     ),
     words && field
@@ -2040,7 +2797,7 @@ function dashboardView(): HTMLElement {
                   'tr',
                   {},
                   h('td', { class: 'nowrap' }, idCell(r)),
-                  h('td', {}, r.title),
+                  h('td', {}, linked(r.title, { entry: r.entry, dir: `design/${r.entry}` })),
                   h(
                     'td',
                     { class: 'mono small muted' },
@@ -2294,20 +3051,6 @@ async function abandon(): Promise<void> {
 
 function helpModal(): HTMLElement | null {
   if (!S.help) return null;
-  const rows: [string, string][] = [
-    ['j k', 'Next / previous item (or file)'],
-    ['n', 'Next unreviewed item'],
-    ['a m d f r', 'Accept · amend · decline · defer · revise'],
-    ['u', 'Clear the ruling'],
-    ['c q s', 'Comment · question · suggest wording, on selected text'],
-    ['i x', 'Intent here · mismatch with intent, on selected text'],
-    ['1 2 3 4', 'Queue · files · dashboard · review & submit'],
-    ['p', 'This session: every ruling and note'],
-    ['v', 'Markdown as prose / as source'],
-    ['/', 'Filter files'],
-    ['t', 'Light / dark'],
-    ['⌘↵ Esc', 'Confirm / leave a text field'],
-  ];
   return h(
     'div',
     {
@@ -2320,27 +3063,13 @@ function helpModal(): HTMLElement | null {
     h(
       'div',
       { class: 'modal-box' },
-      h('div', { class: 'modal-head' }, h('strong', {}, 'Keyboard')),
       h(
-        'table',
-        { class: 'keys' },
-        h(
-          'tbody',
-          {},
-          rows.map(([k, d]) =>
-            h(
-              'tr',
-              {},
-              h(
-                'td',
-                {},
-                k.split(' ').map((x) => h('kbd', {}, x)),
-              ),
-              h('td', {}, d),
-            ),
-          ),
-        ),
+        'div',
+        { class: 'modal-head' },
+        h('strong', {}, 'Keyboard'),
+        h('span', { class: 'muted small' }, 'More on the home page (1)'),
       ),
+      keysTable(),
     ),
   );
 }
@@ -2388,13 +3117,15 @@ function render(): void {
     return;
   }
   const body =
-    S.view === 'queue'
-      ? queueView()
-      : S.view === 'files'
-        ? filesView()
-        : S.view === 'dashboard'
-          ? dashboardView()
-          : submitView();
+    S.view === 'home'
+      ? homeView()
+      : S.view === 'queue'
+        ? queueView()
+        : S.view === 'files'
+          ? filesView()
+          : S.view === 'dashboard'
+            ? dashboardView()
+            : submitView();
   const banner = S.banner
     ? h(
         'div',
@@ -2417,6 +3148,7 @@ function render(): void {
     header(),
     banner,
     h('div', { class: `main ${S.drawer ? 'with-drawer' : ''}` }, body, drawer() ?? ''),
+    themePicker() ?? '',
     editorModal() ?? '',
     helpModal() ?? '',
   );
@@ -2452,18 +3184,6 @@ function scrollToFocus(): void {
   pane.scrollTop = 0;
 }
 
-function toggleTheme(): void {
-  const dark = matchMedia('(prefers-color-scheme: dark)').matches;
-  const cur = document.documentElement.dataset.theme ?? (dark ? 'dark' : 'light');
-  const next = cur === 'dark' ? 'light' : 'dark';
-  document.documentElement.dataset.theme = next;
-  try {
-    localStorage.setItem('intent-review-theme', next);
-  } catch {
-    // storage may be unavailable; the toggle still holds for this page
-  }
-}
-
 function toast(msg: string): void {
   const t = h('div', { class: 'toast' }, msg);
   document.body.append(t);
@@ -2486,9 +3206,10 @@ function onKey(e: KeyboardEvent): void {
     return;
   }
   if (e.key === 'Escape') {
-    if (S.help || S.drawer) {
+    if (S.help || S.drawer || S.picker) {
       S.help = false;
       S.drawer = false;
+      S.picker = false;
       render();
     }
     hideToolbar();
@@ -2517,17 +3238,21 @@ function onKey(e: KeyboardEvent): void {
         render();
       }
     },
-    '1': () => go('queue'),
-    '2': () => go('files'),
-    '3': () => go('dashboard'),
-    '4': () => go('submit'),
+    '1': () => go('home'),
+    '2': () => go('queue'),
+    '3': () => go('files'),
+    '4': () => go('dashboard'),
+    '5': () => go('submit'),
     p: toggleDrawer,
     v: toggleRaw,
     '/': () => {
       if (S.view !== 'files') go('files');
       document.getElementById('file-filter')?.focus();
     },
-    t: toggleTheme,
+    t: () => {
+      S.picker = !S.picker;
+      render();
+    },
     '?': () => {
       S.help = !S.help;
       render();
@@ -2544,12 +3269,9 @@ function onKey(e: KeyboardEvent): void {
 // Boot
 
 async function boot(): Promise<void> {
-  try {
-    const saved = localStorage.getItem('intent-review-theme');
-    if (saved === 'dark' || saved === 'light') document.documentElement.dataset.theme = saved;
-  } catch {
-    // no stored theme
-  }
+  injectThemes(THEMES);
+  const systemDark = matchMedia('(prefers-color-scheme: dark)').matches;
+  applyTheme(systemDark ? DEFAULT_DARK : DEFAULT_LIGHT, false);
   const p = await api<{ packet: Packet; digest: string; draftPath: string }>('GET', '/api/packet');
   if (p.status !== 200) {
     root.replaceChildren(
@@ -2567,9 +3289,29 @@ async function boot(): Promise<void> {
     stale: boolean;
     error?: string;
   }>('GET', '/api/draft');
+  const th = await api<{
+    themes: Theme[];
+    initial: string | null;
+    dir: string | null;
+    prefs: { theme?: string };
+  }>('GET', '/api/themes');
   const draft = d.data.draft;
   const packet = p.data.packet;
   FILES = new Map(packet.files.map((f) => [f.path, f.text]));
+  IDX = buildIndex(
+    packet.files.map((f) => f.path),
+    [...(packet.ledger ?? []).map((r) => r.id), ...packet.items.map((i) => i.id)],
+    packet.items.map((i) => i.id),
+  );
+  injectThemes([...THEMES, ...(th.data.themes ?? [])]);
+  const known = (id: string | null | undefined) =>
+    !!id && [...THEMES, ...(th.data.themes ?? [])].some((t) => t.id === id);
+  const startTheme = known(th.data.initial)
+    ? th.data.initial
+    : known(th.data.prefs?.theme)
+      ? th.data.prefs.theme
+      : null;
+  if (startTheme) applyTheme(startTheme, false);
   const restored = draft
     ? d.data.stale
       ? 'Restored a draft made against a different version of this packet. Rulings and notes were kept — check them against the current items.'
@@ -2584,7 +3326,7 @@ async function boot(): Promise<void> {
       verdicts: (draft?.verdicts ?? []).filter((v) => packet.items.some((i) => i.id === v.item)),
       annotations: draft?.annotations ?? [],
     },
-    view: 'queue',
+    view: 'home',
     current: 0,
     file: null,
     side: null,
@@ -2598,6 +3340,11 @@ async function boot(): Promise<void> {
     errors: [],
     ended: null,
     help: false,
+    theme: document.documentElement.dataset.theme ?? DEFAULT_LIGHT,
+    picker: false,
+    customThemes: th.data.themes ?? [],
+    themeDir: th.data.dir ?? null,
+    folds: loadFolds(),
   };
   if (draft?.comment) S.review.comment = draft.comment;
   if (draft?.overall) S.review.overall = draft.overall;
@@ -2605,6 +3352,13 @@ async function boot(): Promise<void> {
   applyHash();
   document.title = packet.title;
   document.addEventListener('keydown', onKey);
+  initTips();
+  document.addEventListener('mousedown', (e) => {
+    if (S.picker && !(e.target as HTMLElement).closest('.picker, .theme-btn')) {
+      S.picker = false;
+      render();
+    }
+  });
   document.addEventListener('mouseup', () => setTimeout(showToolbar, 0));
   document.addEventListener('keyup', (e) => {
     if (e.shiftKey) setTimeout(showToolbar, 0);
@@ -2616,8 +3370,8 @@ async function boot(): Promise<void> {
 }
 
 /**
- * Deep links: `#item=<id>`, `#file=<path>`, `#view=files|dashboard|submit`,
- * `#drawer`, `#theme=dark|light` — so an agent can point at a specific spot.
+ * Deep links: `#item=<id>`, `#file=<path>`, `#view=home|queue|files|dashboard|submit`,
+ * `#drawer`, `#theme=<id>` — so an agent can point at a specific spot.
  */
 function applyHash(): void {
   const q = new URLSearchParams(location.hash.slice(1));
@@ -2627,17 +3381,19 @@ function applyHash(): void {
   const theme = q.get('theme');
   if (item) {
     const i = items().findIndex((x) => x.id === item);
-    if (i >= 0) S.current = i;
+    if (i >= 0) {
+      S.current = i;
+      S.view = 'queue';
+    }
   }
   if (file && FILES.has(file)) {
     S.view = 'files';
     S.file = file;
     revealDir(file);
   }
-  if (view === 'queue' || view === 'files' || view === 'dashboard' || view === 'submit')
-    S.view = view;
+  if (TABS.some(([v]) => v === view)) S.view = view as View;
   if (q.has('drawer')) S.drawer = true;
-  if (theme === 'dark' || theme === 'light') document.documentElement.dataset.theme = theme;
+  if (theme && allThemes().some((t) => t.id === theme)) applyTheme(theme, false);
 }
 
 boot().catch((e: unknown) => {

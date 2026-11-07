@@ -2,8 +2,9 @@
 
 > The first build: a versioned packet and decisions contract open to every producer, a scanner that
 > drafts packets for the first two producers (open items on the main line; a branch against its
-> base), and a loopback review page — shipped as one Node file inside the skill — on which a human
-> rules, annotates any file, and submits.
+> base), and a loopback page — shipped as one Node file inside the skill — that explains the
+> repository, links everything in it, and carries a human through ruling, annotating, and
+> submitting.
 >
 > **Status:** built — awaiting review · **Started:** 2026-11-07
 
@@ -15,17 +16,27 @@ entry builds the surface the [review loop](../../intent/01-concepts/00-review-lo
 first two [producers](../../intent/01-concepts/01-producers.md)' mechanical half; the agent writes
 the analysis, the page collects the rulings, the agent executes.
 
+Use on a real repository reshaped the page before this entry closed (the [build log](build-log.md)
+has the detail): a reader could not hold the web of numbered, cross-referenced pieces in their head,
+could not tell what each control asked of the agent, and met the review as a wall of text. So the
+page grew into the explorer and companion the [vision](../../intent/00-foundation/00-vision.md) now
+describes — a home page that teaches it, identifiers linked everywhere, controls that explain
+themselves, supporting detail folded, the ruling and its consequences given the weight of a call to
+action, and themes.
+
 It is the first entry; it establishes the toolchain
 ([0001](../decisions/0001-typescript-bun-toolchain.md),
 [0002](../decisions/0002-single-file-node-bundle.md)) as well as the tool.
 
 ## Serves intent
 
-- [`00-vision.md`](../../intent/00-foundation/00-vision.md) — one surface for every judgment: the
-  queue triaged, the evidence beside the item, the proposal as a diff, the analysis summary-first.
+- [`00-vision.md`](../../intent/00-foundation/00-vision.md) — the explorer and companion: a home
+  page that orients, a files view of the whole snapshot, the queue triaged with the evidence beside
+  the item, the proposal as a diff, the analysis summary-first.
 - [`01-principles.md`](../../intent/00-foundation/01-principles.md) — no model calls (the tool has
   no network client), plain Node from the skill, loopback only with a token, drafts autosaved,
-  quote-anchored notes on any file, a readable page driven from the keyboard.
+  quote-anchored notes on any file, a readable and themeable page driven from the keyboard, every
+  control explained on hover or focus, every identifier linked.
 - [`00-review-loop.md`](../../intent/01-concepts/00-review-loop.md) — both modes, the five verdicts
   with their required words, five note intents, the overall verdict on a change, one submission.
 - [`01-producers.md`](../../intent/01-concepts/01-producers.md) — the open-items and branch-review
@@ -48,10 +59,19 @@ It is the first entry; it establishes the toolchain
   - **`serve`**: the page on `127.0.0.1` behind a per-run token, a draft autosaved beside the
     decisions file, submit-then-exit, abandon-then-exit.
   - **`locate`**, re-finding each submitted note in the repository's current files.
-  - The page: the **queue** (item, evidence excerpts, and the cited files beside it), the **files**
-    browser (the whole snapshot, prose or highlighted code), the **dashboard** (every SF by status
-    and by slice), **review & submit**, and a **session drawer** listing every ruling and note made
-    this sitting, each jumping back to where it was made, editable and removable.
+  - The page: a **home** page (what the review is, what is asked with counts, how to work it, every
+    view, ruling, note kind, and key), the **queue** (item, evidence excerpts, and the cited files
+    beside it; supporting detail folded; the ruling dock with the consequences pinned at its foot),
+    the **files** browser (the whole snapshot, prose or highlighted code), the **dashboard** (every
+    SF by status and by slice), **review & submit**, and a **session drawer** listing every ruling
+    and note made this sitting, each jumping back to where it was made, editable and removable.
+  - **Linked identifiers** in every rendered surface — SF ids, design entry numbers, ADRs,
+    repository paths, Markdown links — each with a peek (title, status, one-line summary) on hover
+    or focus, and followed on click.
+  - **Delayed tooltips** on every view, ruling, note kind, and header control, shown on keyboard
+    focus too.
+  - **Themes**: six built-in (four from the Gyokuro family, a neutral pair), custom themes as JSON
+    files, a picker, and the choice remembered outside the repository.
   - The bundle, its drift check, the subproject gate, and CI for both.
 - **Deferred:**
   - **The other four producers** — intent improvement, intent extraction, drift audit,
@@ -69,6 +89,12 @@ It is the first entry; it establishes the toolchain
   - **Fuzzy anchoring beyond surroundings** — re-location tries the exact quote, then its
     surroundings, then reports the note orphaned with its quote and words intact. Safe because an
     orphaned note still carries everything the agent needs to act on it by reading.
+  - **Linking the repository's own numbering schemes** — principle numbers (`§16`), walkthrough
+    steps, and other conventions a particular repository invents. Safe to defer because the
+    architecture's own identifiers (SFs, entries, ADRs, paths) are linked, and a repository-specific
+    scheme needs a declared convention to resolve rather than a guess.
+  - **A theme editor in the page** — themes are written as JSON files. Safe because a theme is a
+    dozen lines a person writes once, and the picker shows where to put it and links the format.
   - **A review timeout, live reload of a changed packet, full-text search, forge state** — each a
     convenience the loop works without: the agent can stop a stale server, a changed packet is a new
     iteration, the file filter and the browser's find cover search, and an item's Status already
@@ -79,11 +105,16 @@ It is the first entry; it establishes the toolchain
   2. `mise run check` and `mise run template-check` at the repository root stay green.
   3. The end-to-end tests run the committed bundle under the pinned Node 20: serve a fixture packet
      in each mode, submit over HTTP, see exit 0 and valid decisions; abandon and a signal exit 3.
-  4. A packet from a real repository — seven SFs on one design entry — is served by the bundle in
-     each mode; the page, the packet, and a draft round-trip answer over HTTP; an invalid submission
-     is refused with each error named and the review stays open; a valid one, with notes on intent,
-     on an item's text, and on source code, writes decisions that `validate` accepts and `locate`
-     re-finds.
+  4. A packet from a real repository — its pending SFs across two design entries and a proposed ADR
+     — is served by the bundle in each mode; the page, the packet, and a draft round-trip answer
+     over HTTP; an invalid submission is refused with each error named and the review stays open; a
+     valid one, with notes on intent, on an item's text, and on source code, writes decisions that
+     `validate` accepts and `locate` re-finds.
+  5. Rendered in a headless browser in light and dark themes at two widths, every view reads
+     cleanly; a selection at the right edge of the side pane keeps its toolbar inside the viewport;
+     a tooltip and an identifier peek appear and stay inside it; the ruling dock is fully visible.
+  6. Every built-in theme holds its text and syntax colours at 4.5:1 or more on every background (a
+     test).
 
 ## Design
 
@@ -123,6 +154,35 @@ It is the first entry; it establishes the toolchain
   binaries and files over 1 MiB are listed as omitted, never inlined. `--files intent` narrows it.
   _Alternative:_ intent only. _Lost_ because notes on code (extraction, drift) are first-class.
   _Cost:_ packets of a few megabytes for a mid-sized repository — local, so acceptable.
+- **Themes are token sets; custom themes are JSON; the choice lives beside them.** The built-ins are
+  data in the source (so a test can hold their contrast), injected as CSS custom properties; the
+  stylesheet uses only tokens. A custom theme is a JSON file naming a built-in base and the tokens
+  it changes, validated (known tokens, colour-shaped values) and loaded from the user's config
+  directory or `--theme`. _Alternative:_ a user CSS file. _Attractive_ because it could restyle
+  anything. _Lost_ because it couples users to the stylesheet's internals and admits arbitrary CSS
+  into the page; tokens are a stable, checkable surface. The last choice is saved in `prefs.json` in
+  the same config directory. _Alternative:_ the browser's `localStorage`. _Lost_ because each run
+  listens on a new port, and a new port is a new origin with empty storage — the choice would not
+  survive one review. _Cost:_ the tool writes one small file outside the repository, only when the
+  reader picks a theme.
+- **Identifiers resolve against the packet, by pattern and context.** `SF-NNN` resolves within the
+  design entry of the text it appears in (an SF's own text, a file under `design/NNNN-…/`), or with
+  an explicit entry (`0051 SF-001`, `0031/SF-005`), or — with no context — when the number is unique
+  among the items under review; `NNNN` resolves to a design entry or ADR that exists; paths and
+  Markdown links resolve relative to the text's own file, then from the root. Anything that does not
+  resolve stays plain text. _Alternative:_ require producers to mark links in the packet.
+  _Attractive_ because it is exact. _Lost_ because the text that matters most — intent and design
+  files — is written by people, not producers. _Cost:_ a false link is possible where a four-digit
+  number happens to match an entry; it is visibly a link and its peek says what it is.
+- **Tooltips are the page's own, delayed.** Every view, ruling, note kind, and header control
+  carries a description, shown after ~700 ms of hover or at once on keyboard focus, placed inside
+  the viewport. _Alternative:_ the native `title` attribute. _Lost_ because it cannot be styled, its
+  delay is the browser's, and keyboard focus never shows it. _Cost:_ one small global listener.
+- **The consequences ride with the ruling.** "If accepted / if declined" sit in the pinned dock,
+  above the five rulings (folded on request, remembered), so the choice and its effect are read
+  together; the chosen side is outlined. _Alternative:_ keep them in the item body. _Lost_ because
+  they scroll away exactly when the reader reaches for a ruling. _Cost:_ the dock is taller; on
+  short screens the consequences clamp to two lines until clicked.
 - **A per-run token and a Host check.** Every request must carry a random token from the printed
   URL, and the `Host` header must be the loopback address. _Alternative:_ trust loopback alone.
   _Lost_ because any page in the reviewer's browser can post to a loopback port, and a DNS-rebinding
@@ -261,15 +321,20 @@ of the packet file's bytes, so the agent can confirm which packet was answered.
 node <skill>/scripts/review.mjs scan     --repo <dir> [--ref <ref>] [--no-questions] [--files repo|intent] [--out <packet.json>]
 node <skill>/scripts/review.mjs scan     --repo <dir> --base <ref> [--head <ref>] [--files repo|intent] [--out <packet.json>]
 node <skill>/scripts/review.mjs validate (--packet <file> | --decisions <file>)
-node <skill>/scripts/review.mjs serve    --packet <file> --out <decisions.json> [--port <n>] [--open]
+node <skill>/scripts/review.mjs serve    --packet <file> --out <decisions.json> [--port <n>] [--open] [--theme <id|file.json>]
 node <skill>/scripts/review.mjs locate   --decisions <file> --repo <dir> [--packet <file>]
 ```
 
 - `serve` validates the packet, listens on `127.0.0.1` (a free port unless `--port`), and prints
   `review: open http://127.0.0.1:<port>/?token=<token>`, then the draft path. `--open` also asks the
   platform to open the URL; a failure is ignored. The agent runs it in the background, gives the URL
-  to the human, and waits for the process. The URL takes deep links: `#item=<id>`, `#file=<path>`,
-  `#view=files|dashboard|submit`, `#drawer`.
+  to the human, and waits for the process. The page opens on its home page; deep links go elsewhere:
+  `#item=<id>`, `#file=<path>`, `#view=home|queue|files|dashboard|submit`, `#drawer`, `#theme=<id>`.
+- Custom themes are `*.json` files in `<config>/themes/`, where `<config>` is
+  `$INTENT_REVIEW_CONFIG`, else `$XDG_CONFIG_HOME/intent-review`, else `~/.config/intent-review`;
+  `--theme` takes a built-in id or a file. A theme that does not validate is reported and skipped.
+  The format and tokens:
+  [`review-themes.md`](../../../../.agents/skills/intent-architecture/references/review-themes.md).
 - The draft is `<out without .json>.draft.json`, loaded on start and saved on every change; submit
   deletes it, abandon keeps it. The directory of `--out` is created if it is missing.
 - **Exit codes:** `0` decisions written · `2` usage error or invalid input (each error printed) ·
@@ -286,7 +351,9 @@ node <skill>/scripts/review.mjs locate   --decisions <file> --repo <dir> [--pack
 
 **HTTP** (every request needs the token — `?token=` on the page, the `X-Review-Token` header on the
 API — and a loopback `Host`): `GET /` the page · `GET /api/packet` · `GET`/`PUT /api/draft` ·
-`POST /api/submit` → `200 { out }` or `400 { errors }` · `POST /api/abandon`.
+`POST /api/submit` → `200 { out }` or `400 { errors }` · `POST /api/abandon` · `GET /api/themes`
+(custom themes, the starting theme, the themes directory, saved preferences) · `PUT /api/prefs`
+(`{ theme }`).
 
 ### Mechanisms
 
@@ -316,14 +383,23 @@ API — and a loopback `Host`): `GET /` the page · `GET /api/packet` · `GET`/`
 - **The page.** Vanilla TypeScript and DOM, no framework: one state object; discrete actions
   re-render (scroll positions kept), typing updates state only; every change saves the draft,
   debounced. A selection inside any annotatable view raises a toolbar of the five note intents; a
-  reference hovered shows a peek of the passage, clicked shows it beside the item. The queue orders
-  branch reviews judgment first, routine last; the ruling bar is pinned to the foot of the item.
-  Branch changes show modified files as highlighted, word-diffed patches and added Markdown files as
-  prose.
+  reference hovered shows a peek of the passage, clicked shows it beside the item. Toolbar, peeks,
+  and tooltips share one placement rule: above or below the anchor, flipped when there is no room,
+  clamped inside the viewport. The queue orders branch reviews judgment first, routine last. An item
+  opens with the recommendation and summary, then the proposal and related items; the evidence
+  follows, and an SF's own fields are folded beneath "the spec-feedback as written"; any fold's
+  state is kept for the session by section, across items. The ruling dock is pinned to the foot of
+  the item. Branch changes show modified files as highlighted, word-diffed patches and added
+  Markdown files as prose.
+- **Links.** `xref` finds identifiers in text against an index built from the packet (files, design
+  entries, ADRs, the ledger's SF ids, the items under review) and emits ranges that the renderer
+  carries like any style, so a link keeps its source offsets and can sit inside an annotation. A
+  peek shows the target's title, status, and first sentence (an SF's friction, a document's
+  opening); a click opens an item, or shows a file beside the item, or in the files view.
 - **Keys.** `j`/`k` next/previous (item, or file) · `n` next unreviewed · `a m d f r` the five
-  verdicts · `u` clear · `c q s i x` the five note intents on the selection · `1`–`4` the views ·
-  `p` the session drawer · `v` prose/source · `/` filter files · `t` light/dark · `?` keys. A key
-  typed in a field is text; `⌘`/`Ctrl`+`Enter` confirms, `Esc` leaves.
+  verdicts · `u` clear · `c q s i x` the five note intents on the selection · `1`–`5` home, queue,
+  files, dashboard, review & submit · `p` the session drawer · `v` prose/source · `/` filter files ·
+  `t` themes · `?` keys. A key typed in a field is text; `⌘`/`Ctrl`+`Enter` confirms, `Esc` leaves.
 - **The bundle and the drift check.** `scripts/build.ts` builds `src/ui/main.ts` for the browser,
   inlines it and the stylesheet into the page template, builds `src/main.ts` for Node with the page
   defined as a constant, and refuses any import that is not `node:`. `mise run build` writes the

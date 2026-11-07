@@ -7,7 +7,8 @@
 
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { locate } from './anchor.ts';
 import { type ScanOptions, scanRepo } from './scan.ts';
@@ -19,6 +20,10 @@ import {
   validatePacket,
 } from './schema.ts';
 import { draftPathFor, serve } from './server.ts';
+import { resolveTheme, THEMES, type Theme, validateTheme } from './themes.ts';
+
+const THEME_DOCS =
+  'https://github.com/crumley/intent-architecture/blob/main/.agents/skills/intent-architecture/references/review-themes.md';
 
 declare const __PAGE_HTML__: string | undefined;
 
@@ -30,10 +35,14 @@ usage:
   review.mjs scan     --repo <dir> [--out <packet.json>] [--ref <ref>] [--no-questions]
   review.mjs scan     --repo <dir> --base <ref> [--head <ref>] [--out <packet.json>]
   review.mjs validate (--packet <file> | --decisions <file>)
-  review.mjs serve    --packet <file> --out <decisions.json> [--port <n>] [--open]
+  review.mjs serve    --packet <file> --out <decisions.json> [--port <n>] [--open] [--theme <id|file.json>]
   review.mjs locate   --decisions <file> --repo <dir> [--packet <file>]
 
-exit codes: 0 done · 2 usage error or invalid input · 3 review abandoned · 1 unexpected`;
+exit codes: 0 done · 2 usage error or invalid input · 3 review abandoned · 1 unexpected
+
+themes: built-in ${THEMES.map((t) => t.id).join(', ')}; custom themes are JSON files in
+  <config>/themes/ (config: $INTENT_REVIEW_CONFIG, else $XDG_CONFIG_HOME/intent-review, else
+  ~/.config/intent-review) or passed with --theme. Format: ${THEME_DOCS}`;
 
 class UsageError extends Error {}
 class InputError extends Error {
@@ -49,7 +58,7 @@ type Flags = Record<string, string | true>;
 const KNOWN: Record<string, { values: string[]; switches: string[] }> = {
   scan: { values: ['repo', 'out', 'ref', 'base', 'head'], switches: ['no-questions'] },
   validate: { values: ['packet', 'decisions'], switches: [] },
-  serve: { values: ['packet', 'out', 'port'], switches: ['open'] },
+  serve: { values: ['packet', 'out', 'port', 'theme'], switches: ['open'] },
   locate: { values: ['decisions', 'repo', 'packet'], switches: [] },
 };
 
@@ -221,21 +230,35 @@ async function cmdServe(flags: Flags, io: Io): Promise<number> {
   mkdirSync(dirname(out), { recursive: true });
   const draft = draftPathFor(out);
   const html = typeof __PAGE_HTML__ === 'string' ? __PAGE_HTML__ : FALLBACK_HTML;
-  const handle = await serve(
-    port === undefined
-      ? { packet, digest, out, draft, html }
-      : { packet, digest, out, draft, html, port },
+  const config = configDir();
+  const themeDir = join(config, 'themes');
+  const { themes, initial } = loadThemes(
+    themeDir,
+    typeof flags.theme === 'string' ? flags.theme : undefined,
+    io,
   );
-  io.out(`review: open ${handle.url}`);
-  io.out(`review: ${packet.items.length} items; draft autosaves to ${draft}`);
-  if (flags.open === true) openBrowser(handle.url);
-
+  const base = {
+    packet,
+    digest,
+    out,
+    draft,
+    html,
+    themes,
+    themeDir,
+    prefsPath: join(config, 'prefs.json'),
+  };
+  const withTheme = initial === undefined ? base : { ...base, initialTheme: initial };
+  const handle = await serve(port === undefined ? withTheme : { ...withTheme, port });
+  // Handlers first: an agent may signal the process the moment it sees the URL.
   const abandon = () => {
     io.out(`review: abandoned — no decisions written; draft kept at ${draft}`);
     handle.close().finally(() => process.exit(3));
   };
   process.once('SIGINT', abandon);
   process.once('SIGTERM', abandon);
+  io.out(`review: open ${handle.url}`);
+  io.out(`review: ${packet.items.length} items; draft autosaves to ${draft}`);
+  if (flags.open === true) openBrowser(handle.url);
 
   const outcome = await handle.done;
   process.off('SIGINT', abandon);
@@ -282,6 +305,53 @@ function cmdLocate(flags: Flags, io: Io): number {
   });
   io.out(JSON.stringify(results, null, 2));
   return 0;
+}
+
+/** Where preferences and custom themes live: never inside the reviewed repository. */
+export function configDir(env: NodeJS.ProcessEnv = process.env): string {
+  if (env.INTENT_REVIEW_CONFIG) return env.INTENT_REVIEW_CONFIG;
+  const xdg = env.XDG_CONFIG_HOME || join(homedir(), '.config');
+  return join(xdg, 'intent-review');
+}
+
+/**
+ * Custom themes from the themes directory, plus `--theme` — a built-in id, or a
+ * theme file (which is loaded and becomes the starting theme). A broken file is
+ * reported and skipped; a theme never stops a review.
+ */
+export function loadThemes(
+  dir: string,
+  flag: string | undefined,
+  io: Io,
+): { themes: Theme[]; initial?: string } {
+  const themes: Theme[] = [];
+  const load = (path: string): Theme | null => {
+    let raw: unknown;
+    try {
+      raw = JSON.parse(readFileSync(path, 'utf8'));
+    } catch {
+      io.err(`review: warning: theme ${path} is not readable JSON; skipped`);
+      return null;
+    }
+    const v = validateTheme(raw);
+    if (!v.ok) {
+      io.err(`review: warning: theme ${path} skipped:\n  ${v.errors.join('\n  ')}`);
+      return null;
+    }
+    const t = resolveTheme(v.theme);
+    if (t) themes.push(t);
+    return t;
+  };
+  if (existsSync(dir)) {
+    for (const name of readdirSync(dir).sort()) if (name.endsWith('.json')) load(join(dir, name));
+  }
+  if (flag === undefined) return { themes };
+  if (THEMES.some((t) => t.id === flag) || themes.some((t) => t.id === flag))
+    return { themes, initial: flag };
+  if (!existsSync(flag))
+    throw new UsageError(`--theme: "${flag}" is neither a theme id nor a file`);
+  const t = load(flag);
+  return t ? { themes, initial: t.id } : { themes };
 }
 
 function openBrowser(url: string): void {

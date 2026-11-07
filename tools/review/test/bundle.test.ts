@@ -41,6 +41,11 @@ describe('the shipped bundle', () => {
     [['validate', '--packet', 'GOOD'], 0, 'is a valid packet'],
     [['scan', '--repo', '/nonexistent'], 2, 'has no intent/'],
     [['scan', '--repo', '.', '--head', 'x'], 2, '--head needs --base'],
+    [
+      ['serve', '--packet', 'GOOD', '--out', 'x.json', '--theme', 'no-such-theme'],
+      2,
+      'neither a theme id nor a file',
+    ],
   ];
   test.each(CLI)('%p -> exit %d', (args, code, fragment) => {
     const dir = tempDir();
@@ -91,6 +96,29 @@ describe('the shipped bundle', () => {
     expect(spawnSync('test', ['-e', run.out.replace('.json', '.draft.json')]).status).toBe(0);
   });
 
+  test('--theme loads a custom theme file and starts in it', async () => {
+    const dir = tempDir();
+    const file = join(dir, 'mine.json');
+    writeFileSync(
+      file,
+      JSON.stringify({
+        id: 'mine',
+        name: 'Mine',
+        base: 'gyokuro-dark',
+        colors: { accent: '#ff00aa' },
+      }),
+    );
+    const run = await serveBundle(packet(), ['--theme', file]);
+    const t = await run.api('GET', '/api/themes');
+    expect([
+      t.body.initial,
+      t.body.themes.map((x: { id: string }) => x.id),
+      t.body.themes[0].colors.accent,
+    ]).toEqual(['mine', ['mine'], '#ff00aa']);
+    run.child.kill('SIGTERM');
+    expect(await run.exit).toBe(3);
+  });
+
   test('a signal → exit 3', async () => {
     const run = await serveBundle(packet());
     run.child.kill('SIGTERM');
@@ -109,14 +137,19 @@ type Run = {
   api: (method: string, path: string, body?: unknown) => Promise<{ status: number; body: Loose }>;
 };
 
-async function serveBundle(p: object): Promise<Run> {
+async function serveBundle(p: object, extraArgs: string[] = []): Promise<Run> {
   const dir = tempDir();
   const packetPath = join(dir, 'packet.json');
   const out = join(dir, 'not-yet', 'decisions.json'); // serve creates the directory
   writeFileSync(packetPath, JSON.stringify(p));
-  const child = spawn('node', [BUNDLE, 'serve', '--packet', packetPath, '--out', out], {
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
+  const child = spawn(
+    'node',
+    [BUNDLE, 'serve', '--packet', packetPath, '--out', out, ...extraArgs],
+    {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, INTENT_REVIEW_CONFIG: join(dir, 'config') },
+    },
+  );
   let stdout = '';
   const exit = new Promise<number | null>((resolve) => child.on('exit', (code) => resolve(code)));
   const url = await new Promise<string>((resolve, reject) => {
