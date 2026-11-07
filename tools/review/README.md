@@ -2,8 +2,8 @@
 
 The explorer and companion for an intent-architecture repository: point it at a repository (through
 a packet an agent prepares) and it opens on a home page that says what is there and what needs you,
-links every SF, design entry, decision, and path to what it names, and carries you through the acts
-that keep the architecture healthy — ruling on open spec-feedback, open questions, and a branch's
+links every IF, design entry, decision, and path to what it names, and carries you through the acts
+that keep the architecture healthy — ruling on open intent feedback, open questions, and a branch's
 intent changes, and annotating any file, code included. The agent carries out what you decide.
 Purpose: [`intent/00-foundation/00-vision.md`](intent/00-foundation/00-vision.md).
 

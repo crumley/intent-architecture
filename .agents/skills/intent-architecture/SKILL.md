@@ -358,7 +358,7 @@ means understanding changed; every idea keeps one home; every choice keeps its _
 
 ## When asked to review intent
 
-When the human wants to work through what needs their judgment — "review the open spec feedback",
+When the human wants to work through what needs their judgment — "review the open intent feedback",
 "review the intent", "what needs my decision", "review this branch's intent changes" — use the
 **review tool** this skill ships: `node <skill-dir>/scripts/review.mjs` (one file, Node 20+, nothing
 to install; `<skill-dir>` is this skill's directory). The loop:
@@ -370,9 +370,9 @@ to install; `<skill-dir>` is this skill's directory). The loop:
    human rules on each item (accept, amend, decline, defer, revise), annotates any file, and
    submits.
 3. **Carry out** the decisions: intent edits in their own change, never bundled with design or build
-   work; each SF's Status line updated (ruled-and-awaiting until the intent change merges, then
-   adjudicated; or declined with the human's why); every note acted on; a branch's overall verdict
-   honoured.
+   work; each IF's Status line (an IF is an intent-feedback item) updated (ruled-and-awaiting until
+   the intent change merges, then adjudicated; or declined with the human's why); every note acted
+   on; a branch's overall verdict honoured.
 4. **Iterate** with a smaller packet until nothing comes back.
 
 The full procedure — producers, packet fields, the Status wording for every outcome, and what each

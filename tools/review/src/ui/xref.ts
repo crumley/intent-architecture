@@ -1,5 +1,5 @@
 // Cross-references: find the identifiers a reader cannot hold in their head —
-// SF ids, design entry numbers, ADR numbers, repository paths, Markdown links —
+// intent-feedback ids (IF-NNN, and the legacy SF-NNN), design entry numbers, ADR numbers, repository paths, Markdown links —
 // and resolve each against the packet, so every rendered surface can link them.
 // Pure: the index is built from the packet; the page renders and follows links.
 
@@ -11,11 +11,11 @@ export type RefIndex = {
   entries: Map<string, string>;
   /** "0006" -> "design/decisions/0006-tmux-detached-host.md" */
   adrs: Map<string, string>;
-  /** "0031-detached-session-hosting/SF-005" ids known to the ledger or the items */
+  /** "0031-detached-session-hosting/IF-005" ids known to the ledger or the items */
   sfs: Set<string>;
   /** basename -> paths, for `file.md` mentions without a directory */
   basenames: Map<string, string[]>;
-  /** the items under review: an unqualified SF id with no entry context resolves if unique here */
+  /** the items under review: an unqualified IF id with no entry context resolves if unique here */
   preferred: string[];
 };
 
@@ -64,9 +64,9 @@ export function resolvePath(idx: RefIndex, ctx: RefContext, raw: string): string
 }
 
 /**
- * Link ranges (absolute offsets) for `text`. Link strings: `sf:<entry>/SF-NNN`,
+ * Link ranges (absolute offsets) for `text`. Link strings: `if:<entry>/IF-NNN`,
  * `entry:<NNNN>`, `adr:<NNNN>`, `file:<path>`. Overlaps keep the first found,
- * in the order Markdown links, SF ids, ADRs, paths, entry numbers.
+ * in the order Markdown links, IF ids, ADRs, paths, entry numbers.
  */
 export function findRefs(text: string, idx: RefIndex, ctx: RefContext = {}): Range[] {
   const out: Range[] = [];
@@ -85,10 +85,13 @@ export function findRefs(text: string, idx: RefIndex, ctx: RefContext = {}): Ran
     if (path) add(at + 1, textEnd, `file:${path}`);
     taken.push([textEnd, at + m[0].length]);
   }
-  // SF ids, optionally qualified by their entry: "0051 SF-001", "0031/SF-005", "SF-002".
-  for (const m of text.matchAll(/\b(?:(\d{4})(?:-[a-z0-9-]+)?(?:['’]s)?[ /])?SF-(\d{3})\b/g)) {
+  // IF ids — and SF ids, their legacy spelling, as an alias — optionally qualified by their
+  // entry: "0051 IF-001", "0031/IF-005", "IF-002", "SF-002".
+  for (const m of text.matchAll(
+    /\b(?:(\d{4})(?:-[a-z0-9-]+)?(?:['’]s)?[ /])?(?:IF|SF)-(\d{3})\b/g,
+  )) {
     const num = m[1];
-    const sf = `SF-${m[2]}`;
+    const sf = `IF-${m[2]}`;
     let entryDir = num ? idx.entries.get(num)?.replace(/^design\//, '') : ctx.entry;
     if (!entryDir && !num) {
       const hits = idx.preferred.filter((p) => p.endsWith(`/${sf}`));
@@ -96,7 +99,7 @@ export function findRefs(text: string, idx: RefIndex, ctx: RefContext = {}): Ran
     }
     if (!entryDir) continue;
     const id = `${entryDir}/${sf}`;
-    if (idx.sfs.has(id)) add(m.index as number, (m.index as number) + m[0].length, `sf:${id}`);
+    if (idx.sfs.has(id)) add(m.index as number, (m.index as number) + m[0].length, `if:${id}`);
   }
   // ADRs: "ADR 0006", "ADR-0006".
   for (const m of text.matchAll(/\bADR[ -]?(\d{4})\b/g)) {

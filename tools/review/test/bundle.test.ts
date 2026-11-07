@@ -70,7 +70,7 @@ describe('the shipped bundle', () => {
     const r = await run.api(
       'POST',
       '/api/submit',
-      state({ verdicts: [{ item: '0001-x/SF-001', verdict: 'defer', ruling: 'later' }] }),
+      state({ verdicts: [{ item: '0001-x/IF-001', verdict: 'defer', ruling: 'later' }] }),
     );
     expect(r.status).toBe(200);
     expect(await run.exit).toBe(0);

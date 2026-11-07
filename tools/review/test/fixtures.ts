@@ -28,11 +28,11 @@ export function packet(over: Partial<Packet> = {}): Packet {
     reviewer: 'Rae',
     items: [
       {
-        id: '0001-x/SF-001',
-        kind: 'sf',
+        id: '0001-x/IF-001',
+        kind: 'if',
         title: 'resume conflates attach',
         status: 'pending',
-        source: { path: 'design/0001-x/spec-feedback.md', line: 3 },
+        source: { path: 'design/0001-x/intent-feedback.md', line: 3 },
         evidence: [{ path: SLICE, section: 'Constraints', quote: 'for resume' }],
         sections: [
           { key: 'friction', label: 'Friction', text: 'Two acts share one verb.' },
@@ -44,12 +44,12 @@ export function packet(over: Partial<Packet> = {}): Packet {
         analysis: { recommendation: { verdict: 'accept', why: 'It holds for any host.' } },
       },
       {
-        id: '0001-x/SF-002',
-        kind: 'sf',
+        id: '0001-x/IF-002',
+        kind: 'if',
         title: 'attach multiplicity',
         status: 'ruled',
         statusLine: 'pending — ruled by Rae 2026-11-06, awaiting the intent edit: shared.',
-        source: { path: 'design/0001-x/spec-feedback.md', line: 9 },
+        source: { path: 'design/0001-x/intent-feedback.md', line: 9 },
         evidence: [{ path: SLICE }],
         sections: [{ key: 'friction', label: 'Friction', text: 'Silent on writers.' }],
       },

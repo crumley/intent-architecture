@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   type Annotation,
+  type Item,
   toDecisions,
   validateDecisions,
   validateDraft,
@@ -20,7 +21,7 @@ const PACKET_CASES: [string, (p: Record<string, unknown>) => void, string[]][] =
   ['items not an array', (p) => (p.items = {}), ['items']],
   [
     'duplicate item id',
-    (p) => ((p.items as { id: string }[])[1]!.id = '0001-x/SF-001'),
+    (p) => ((p.items as { id: string }[])[1]!.id = '0001-x/IF-001'),
     ['items[1].id'],
   ],
   [
@@ -186,33 +187,33 @@ const SUBMIT_CASES: [string, Record<string, unknown>, string[]][] = [
   ['an empty review is valid', state(), []],
   [
     'accept needs no words',
-    state({ verdicts: [{ item: '0001-x/SF-001', verdict: 'accept' }] }),
+    state({ verdicts: [{ item: '0001-x/IF-001', verdict: 'accept' }] }),
     [],
   ],
   [
     'amend needs wording',
-    state({ verdicts: [{ item: '0001-x/SF-001', verdict: 'amend' }] }),
+    state({ verdicts: [{ item: '0001-x/IF-001', verdict: 'amend' }] }),
     ['verdicts[0].wording'],
   ],
   [
     'amend with blank wording',
-    state({ verdicts: [{ item: '0001-x/SF-001', verdict: 'amend', wording: '  ' }] }),
+    state({ verdicts: [{ item: '0001-x/IF-001', verdict: 'amend', wording: '  ' }] }),
     ['verdicts[0].wording'],
   ],
   [
     'decline needs why',
-    state({ verdicts: [{ item: '0001-x/SF-001', verdict: 'decline' }] }),
+    state({ verdicts: [{ item: '0001-x/IF-001', verdict: 'decline' }] }),
     ['verdicts[0].why'],
   ],
   [
     'revise needs request',
-    state({ verdicts: [{ item: '0001-x/SF-001', verdict: 'revise' }] }),
+    state({ verdicts: [{ item: '0001-x/IF-001', verdict: 'revise' }] }),
     ['verdicts[0].request'],
   ],
-  ['defer may stand alone', state({ verdicts: [{ item: '0001-x/SF-001', verdict: 'defer' }] }), []],
+  ['defer may stand alone', state({ verdicts: [{ item: '0001-x/IF-001', verdict: 'defer' }] }), []],
   [
     'unknown verdict',
-    state({ verdicts: [{ item: '0001-x/SF-001', verdict: 'maybe' as 'accept' }] }),
+    state({ verdicts: [{ item: '0001-x/IF-001', verdict: 'maybe' as 'accept' }] }),
     ['verdicts[0].verdict'],
   ],
   [
@@ -224,8 +225,8 @@ const SUBMIT_CASES: [string, Record<string, unknown>, string[]][] = [
     'two verdicts on one item',
     state({
       verdicts: [
-        { item: '0001-x/SF-001', verdict: 'accept' },
-        { item: '0001-x/SF-001', verdict: 'defer' },
+        { item: '0001-x/IF-001', verdict: 'accept' },
+        { item: '0001-x/IF-001', verdict: 'defer' },
       ],
     }),
     ['verdicts[1].item'],
@@ -240,14 +241,14 @@ const SUBMIT_CASES: [string, Record<string, unknown>, string[]][] = [
   [
     'annotation on an item section',
     state({
-      annotations: [ann({ target: { kind: 'item', item: '0001-x/SF-001', section: 'friction' } })],
+      annotations: [ann({ target: { kind: 'item', item: '0001-x/IF-001', section: 'friction' } })],
     }),
     [],
   ],
   [
     'annotation on an unknown section',
     state({
-      annotations: [ann({ target: { kind: 'item', item: '0001-x/SF-001', section: 'nope' } })],
+      annotations: [ann({ target: { kind: 'item', item: '0001-x/IF-001', section: 'nope' } })],
     }),
     ['annotations[0].target.section'],
   ],
@@ -263,7 +264,7 @@ const SUBMIT_CASES: [string, Record<string, unknown>, string[]][] = [
   ],
   [
     'a note may name the item it was made from',
-    state({ annotations: [ann({ item: '0001-x/SF-001' })] }),
+    state({ annotations: [ann({ item: '0001-x/IF-001' })] }),
     [],
   ],
   [
@@ -331,7 +332,7 @@ describe('branch mode: the overall verdict', () => {
 
 describe('drafts and decisions', () => {
   test('a draft keeps a half-written verdict that a submission refuses', () => {
-    const half = state({ verdicts: [{ item: '0001-x/SF-001', verdict: 'amend' }] });
+    const half = state({ verdicts: [{ item: '0001-x/IF-001', verdict: 'amend' }] });
     expect(
       validateDraft({ kind: 'intent-review-draft', version: 1, packet: REF, ...half }).ok,
     ).toBe(true);
@@ -350,13 +351,13 @@ describe('drafts and decisions', () => {
       comment: '  ',
       verdicts: [
         {
-          item: '0001-x/SF-001',
+          item: '0001-x/IF-001',
           verdict: 'decline',
           why: 'no',
           wording: 'left over from amend',
           note: '',
         },
-        { item: '0001-x/SF-002', verdict: 'defer', ruling: 'shared by design', note: 'later' },
+        { item: '0001-x/IF-002', verdict: 'defer', ruling: 'shared by design', note: 'later' },
       ],
       annotations: [{ ...ann({ kind: 'comment', suggestion: 'stale' }), extra: 1 } as Annotation],
     });
@@ -364,8 +365,8 @@ describe('drafts and decisions', () => {
     expect(d.reviewer).toBe('Rae');
     expect('comment' in d).toBe(false);
     expect(d.verdicts).toEqual([
-      { item: '0001-x/SF-001', verdict: 'decline', why: 'no' },
-      { item: '0001-x/SF-002', verdict: 'defer', ruling: 'shared by design', note: 'later' },
+      { item: '0001-x/IF-001', verdict: 'decline', why: 'no' },
+      { item: '0001-x/IF-002', verdict: 'defer', ruling: 'shared by design', note: 'later' },
     ]);
     expect(Object.keys(d.annotations[0] as object).sort()).toEqual([
       'at',
@@ -394,3 +395,12 @@ function ann(over: Partial<Annotation> = {}): Annotation {
     ...over,
   };
 }
+
+test('kind "sf" — the spelling before intent feedback — is accepted, and still needs a status', () => {
+  const p = packet();
+  const legacy = { ...(p.items[0] as Item), kind: 'sf' };
+  expect(validatePacket({ ...p, items: [legacy] }).ok).toBe(true);
+  const { status: _drop, ...noStatus } = legacy;
+  const r = validatePacket({ ...p, items: [noStatus] });
+  expect(r.ok ? [] : r.errors.map((e) => e.path)).toEqual(['items[0].status']);
+});

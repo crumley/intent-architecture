@@ -29,7 +29,7 @@ declare const __PAGE_HTML__: string | undefined;
 
 export const TOOL_VERSION = '1.0.0';
 
-const USAGE = `intent review tool ${TOOL_VERSION} — review a repository's intent and open spec-feedback
+const USAGE = `intent review tool ${TOOL_VERSION} — review a repository's intent and open intent feedback
 
 usage:
   review.mjs scan     --repo <dir> [--out <packet.json>] [--ref <ref>] [--no-questions]
@@ -188,7 +188,7 @@ function cmdScan(flags: Flags, io: Io): number {
     const kinds = [...count.entries()].map(([k, n]) => `${n} ${k}`).join(', ') || 'no items';
     io.out(
       `review: wrote ${out} — ${packet.mode} mode: ${kinds}; ` +
-        `${packet.ledger?.length ?? 0} SFs in the ledger, ${packet.files.length} files`,
+        `${packet.ledger?.length ?? 0} IFs in the ledger, ${packet.files.length} files`,
     );
   } else {
     io.out(json.trimEnd());

@@ -1,14 +1,14 @@
 # Reviewing intent: the review tool
 
-This skill ships a local review page for the human side of the intent architecture: ruling on
-spec-feedback, settling open questions and undecided decisions, and judging a branch's change to the
+This skill ships a local review page for the human side of the intent architecture: ruling on intent
+feedback, settling open questions and undecided decisions, and judging a branch's change to the
 intent before it merges. The agent prepares a **packet**, the human reviews it in the page, and the
 agent carries out the **decisions** the page writes. The tool never calls a model; the packet and
 the decisions files are the whole contract between agent and tool.
 
-Use this when asked to "review the open spec feedback", "review the intent", "what needs my
-decision", "review this branch / PR's intent changes", or when a pile of pending SFs is worth
-working through.
+Use this when asked to "review the open intent feedback", "review the intent", "what needs my
+decision", "review this branch / PR's intent changes", or when a pile of pending IFs (an IF is an
+intent-feedback item) is worth working through.
 
 ## The tool
 
@@ -54,8 +54,14 @@ read a ref without checking it out):
 node <skill-dir>/scripts/review.mjs scan --repo <repo> --out <scratch>/packet.json
 ```
 
-This lists every pending and ruled-but-pending SF, every cross-cutting open question, and every ADR
-still `proposed`, with the whole repository snapshotted and a ledger of every SF for the dashboard.
+Intent feedback lives in each design entry's `intent-feedback.md`, with ids `IF-NNN`. A repository
+not yet migrated to that vocabulary keeps `spec-feedback.md` and `SF-NNN`; the scanner reads both
+and normalizes ids to IF (the source text keeps its own spelling, so quotes still match). When you
+edit a Status line later, edit the file the item came from (its `source.path`) in that file's own
+spelling — migrating a repository's vocabulary is its own change, not part of a review.
+
+This lists every pending and ruled-but-pending IF, every cross-cutting open question, and every ADR
+still `proposed`, with the whole repository snapshotted and a ledger of every IF for the dashboard.
 
 **Branch review (branch mode).** From the repository, against the branch's base:
 
@@ -63,7 +69,7 @@ still `proposed`, with the whole repository snapshotted and a ledger of every SF
 node <skill-dir>/scripts/review.mjs scan --repo <repo> --base <base-ref> --head <branch> --out <scratch>/packet.json
 ```
 
-This lists every changed intent file, every SF the branch raises, re-statuses, or rewrites, every
+This lists every changed intent file, every IF the branch raises, re-statuses, or rewrites, every
 changed ADR, and every changed design entry — each with its diff, measured from the merge base.
 
 The scan does the mechanical half. Then **edit the packet** (it is JSON) and write the half only you
@@ -71,28 +77,29 @@ can write. For every item you keep:
 
 - **Evidence, exact.** Each `evidence` entry should carry a `quote` copied verbatim from the file
   (the smallest passage that carries the point) or a `lines` range for code. The scanner fills a
-  quote when it can match the SF's own; check it, and add code locations where the item touches
+  quote when it can match the IF's own; check it, and add code locations where the item touches
   code. A quote that is not verbatim shows a warning on the page.
-- **The proposal as an edit.** Turn the SF's proposed revision into `proposal.edits`: `before`
+- **The proposal as an edit.** Turn the IF's proposed revision into `proposal.edits`: `before`
   copied verbatim from the file, `after` the revised text. Edits are against the snapshot; when two
   items edit the same passage, give each its own edit and say in `relations` how they compose.
-- **Write identifiers, not descriptions.** The page links SF ids (`SF-005`, `0051 SF-001`), design
-  entry numbers (`0031`), decisions (`ADR 0006`), and repository paths wherever they appear in the
-  packet's text, with a peek on hover — so cite them rather than paraphrasing what they are.
+- **Write identifiers, not descriptions.** The page links intent-feedback ids (`IF-005`,
+  `0051 IF-001`, and the older `SF-` spelling), design entry numbers (`0031`), decisions
+  (`ADR 0006`), and repository paths wherever they appear in the packet's text, with a peek on hover
+  — so cite them rather than paraphrasing what they are.
 - **The analysis, fair.** `summary` (what the item is really about, two or three sentences),
   `ifAccepted` and `ifDeclined` (concrete consequences in this repository), `relations` (other items
   it touches), and `recommendation` (`verdict` + one-line `why`). Fairness is the job: state the
-  strongest case for the option you do not recommend; do not recommend accepting an SF merely
+  strongest case for the option you do not recommend; do not recommend accepting an IF merely
   because the build already assumed it; say when a proposed revision is really design (how) rather
-  than intent (what/why) and belongs in the entry instead; for an SF already ruled, recommend the
+  than intent (what/why) and belongs in the entry instead; for an IF already ruled, recommend the
   wording that lands the recorded ruling. Recommend `amend` when the direction is right but the
   proposal over-reaches.
-- **Triage (branch mode).** Set `attention`: `judgment` for intent changes, SFs raised or
+- **Triage (branch mode).** Set `attention`: `judgment` for intent changes, IFs raised or
   re-statused, ADRs that choose a dependency or touch intent, anything contested; `routine` for
   entry bodies already reviewed, build logs, evidence files, mechanical edits. The page shows
   judgment first.
 - **The overall read (branch mode).** `change.summary`: one paragraph — what the branch does to the
-  intent, what needs the human, what is routine, what (if anything) blocks the merge. Pending SFs do
+  intent, what needs the human, what is routine, what (if anything) blocks the merge. Pending IFs do
   not block a merge (the build proceeds on their assumptions); an intent edit inside a build branch
   does (it must ride its own change). `change.recommendation`: `approve`, `request-changes`, or
   `comment`, with why.
@@ -132,8 +139,8 @@ Read `<scratch>/decisions.json`. Its `packet.digest` is `sha256:` of the packet 
 confirm it answers the packet you served. Before editing anything a note points at, run
 `locate --decisions … --repo <repo> --packet …` to find where each quote sits now.
 
-**Verdicts on spec-feedback** (and how the SF's **Status** line reads afterwards — never rewrite the
-SF's original text):
+**Verdicts on intent feedback** (and how the IF's **Status** line reads afterwards — never rewrite
+the IF's original text):
 
 | Verdict | Do                                                                             | Status line                                                                                                     |
 | ------- | ------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
@@ -150,7 +157,7 @@ Status says adjudicated only after it.
 
 - **Intent edits ride their own change** — a branch and pull request that touches only `intent/`,
   never bundled into a build or design change. Group by coherent ruling (typically one change per
-  design entry's accepted SFs). A `note` on a verdict is the human talking to you: honour it.
+  design entry's accepted IFs). A `note` on a verdict is the human talking to you: honour it.
 - **Status lines are design edits.** They go where the entry lives: on its build branch while that
   is unmerged (confirm its pull request is still open before pushing), otherwise in a small design
   change.

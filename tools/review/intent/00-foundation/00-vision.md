@@ -6,10 +6,10 @@
 ## Purpose
 
 An intent-architecture repository is a web: intent slices that govern design entries, design entries
-that raise spec-feedback against the slices, decisions the entries rest on, code that realizes all
+that raise intent feedback against the slices, decisions the entries rest on, code that realizes all
 of it — every piece linked to others by number and by path. Making sense of it from raw files means
 holding that web in your head; keeping it healthy means noticing, again and again, the few things in
-it that need a human — an SF to rule on, an open question, a change to the intent about to merge, an
+it that need a human — an IF to rule on, an open question, a change to the intent about to merge, an
 intent that lives only in code. This tool exists to be **the way a person points at such a
 repository and understands it**: a friendly, consistent place to get familiar with everything in it
 and how it connects, and to do the important acts that keep the architecture healthy — with an agent
@@ -49,7 +49,7 @@ beside them doing the rest.
 ## Baseline assumptions
 
 - The repository follows the intent architecture — an `intent/` tree, design entries, and their
-  spec-feedback convention — or is being brought into it (extraction).
+  intent-feedback convention — or is being brought into it (extraction).
 - An agent is in the loop on both sides: before (preparing the packet) and after (executing). The
   human never hand-assembles a packet or hand-applies a decision.
 

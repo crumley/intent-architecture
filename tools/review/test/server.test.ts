@@ -49,7 +49,7 @@ describe('draft', () => {
       s,
       'PUT',
       '/api/draft',
-      state({ verdicts: [{ item: '0001-x/SF-001', verdict: 'amend' }] }),
+      state({ verdicts: [{ item: '0001-x/IF-001', verdict: 'amend' }] }),
     );
     expect(put.status).toBe(200);
     const onDisk = JSON.parse(readFileSync(s.draft, 'utf8'));
@@ -100,7 +100,7 @@ describe('submit', () => {
       s,
       'POST',
       '/api/submit',
-      state({ verdicts: [{ item: '0001-x/SF-001', verdict: 'decline' }] }),
+      state({ verdicts: [{ item: '0001-x/IF-001', verdict: 'decline' }] }),
     );
     expect(r.status).toBe(400);
     expect(r.body.errors.map((e: { path: string }) => e.path)).toEqual(['verdicts[0].why']);
@@ -113,8 +113,8 @@ describe('submit', () => {
     await api(s, 'PUT', '/api/draft', state());
     const review = state({
       verdicts: [
-        { item: '0001-x/SF-001', verdict: 'accept' },
-        { item: '0001-x/SF-002', verdict: 'decline', why: 'already said' },
+        { item: '0001-x/IF-001', verdict: 'accept' },
+        { item: '0001-x/IF-002', verdict: 'decline', why: 'already said' },
       ],
       annotations: [
         {

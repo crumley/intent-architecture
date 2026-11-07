@@ -11,15 +11,15 @@ const IDX = buildIndex(
     'design/decisions/0006-tmux-detached-host.md',
   ],
   [
-    '0031-detached-session-hosting/SF-005',
-    '0031-detached-session-hosting/SF-001',
-    '0051-floor-scope-sessions/SF-001',
+    '0031-detached-session-hosting/IF-005',
+    '0031-detached-session-hosting/IF-001',
+    '0051-floor-scope-sessions/IF-001',
   ],
   // the items under review
   [
-    '0031-detached-session-hosting/SF-005',
-    '0031-detached-session-hosting/SF-001',
-    '0051-floor-scope-sessions/SF-001',
+    '0031-detached-session-hosting/IF-005',
+    '0031-detached-session-hosting/IF-001',
+    '0051-floor-scope-sessions/IF-001',
   ],
 );
 const IN_0031 = {
@@ -29,14 +29,17 @@ const IN_0031 = {
 
 // Each row: text, context -> [linked text, link] pairs.
 const CASES: [string, object, [string, string][]][] = [
-  ['see SF-005', IN_0031, [['SF-005', 'sf:0031-detached-session-hosting/SF-005']]],
+  // IF is the id; SF, the spelling before the rename, is an alias that links to the same IF.
+  ['see IF-005', IN_0031, [['IF-005', 'if:0031-detached-session-hosting/IF-005']]],
+  ['as 0051 IF-001 says', IN_0031, [['0051 IF-001', 'if:0051-floor-scope-sessions/IF-001']]],
+  ['see SF-005', IN_0031, [['SF-005', 'if:0031-detached-session-hosting/IF-005']]],
   ['see SF-009', {}, []],
-  ['as 0051 SF-001 says', IN_0031, [['0051 SF-001', 'sf:0051-floor-scope-sessions/SF-001']]],
-  ['0031/SF-001 and SF-009', {}, [['0031/SF-001', 'sf:0031-detached-session-hosting/SF-001']]],
+  ['as 0051 SF-001 says', IN_0031, [['0051 SF-001', 'if:0051-floor-scope-sessions/IF-001']]],
+  ['0031/SF-001 and SF-009', {}, [['0031/SF-001', 'if:0031-detached-session-hosting/IF-001']]],
   [
     'SF-005 is unique among the items; SF-001 is not',
     {},
-    [['SF-005', 'sf:0031-detached-session-hosting/SF-005']],
+    [['SF-005', 'if:0031-detached-session-hosting/IF-005']],
   ],
   ['ADR 0006 chose tmux', {}, [['ADR 0006', 'adr:0006']]],
   [
@@ -83,7 +86,7 @@ test.each(CASES)('%p', (text, ctx, want) => {
 test('entryOf and resolvePath', () => {
   expect([
     entryOf('design/0031-detached-session-hosting/spec-feedback.md'),
-    entryOf('0051-floor-scope-sessions/SF-001'),
+    entryOf('0051-floor-scope-sessions/IF-001'),
     entryOf('intent/README.md'),
   ]).toEqual(['0031-detached-session-hosting', '0051-floor-scope-sessions', undefined]);
   expect(resolvePath(IDX, IN_0031, '../decisions/0006-tmux-detached-host.md#why')).toBe(

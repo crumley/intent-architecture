@@ -14,7 +14,7 @@ export type Mode = 'main' | 'branch';
  * and any other kind generically, so a new producer needs no schema change.
  */
 export type ItemKind = string;
-export type SfStatus = 'pending' | 'ruled' | 'adjudicated' | 'declined';
+export type IfStatus = 'pending' | 'ruled' | 'adjudicated' | 'declined';
 export type Attention = 'judgment' | 'routine';
 export type VerdictKind = 'accept' | 'amend' | 'decline' | 'defer' | 'revise';
 export type OverallKind = 'approve' | 'request-changes' | 'comment';
@@ -24,14 +24,17 @@ export type ChangeStatus = 'added' | 'modified' | 'deleted' | 'renamed';
 export const MODES: readonly Mode[] = ['main', 'branch'];
 /** The kinds this release renders specially; others render generically. */
 export const KNOWN_KINDS = [
-  'sf',
+  'if',
   'question',
   'intent-change',
   'design-entry',
   'decision',
   'finding',
 ] as const;
-export const SF_STATUSES: readonly SfStatus[] = ['pending', 'ruled', 'adjudicated', 'declined'];
+/** Intent feedback (an IF); `sf` is the legacy spelling from before the rename and is accepted. */
+export const isIntentFeedback = (kind: string): boolean => kind === 'if' || kind === 'sf';
+
+export const IF_STATUSES: readonly IfStatus[] = ['pending', 'ruled', 'adjudicated', 'declined'];
 export const VERDICTS: readonly VerdictKind[] = ['accept', 'amend', 'decline', 'defer', 'revise'];
 export const OVERALL: readonly OverallKind[] = ['approve', 'request-changes', 'comment'];
 export const ANNOTATION_KINDS: readonly AnnotationKind[] = [
@@ -75,9 +78,9 @@ export type Item = {
   kind: ItemKind;
   category?: string; // a producer's own sub-kind, e.g. "drift" or "hidden-intent" for a finding
   title: string;
-  status?: SfStatus; // required for kind "sf"
+  status?: IfStatus; // required for kind "if" (intent feedback; legacy "sf")
   statusLine?: string;
-  baseStatusLine?: string; // branch mode: the SF's Status at the base, when the branch changed it
+  baseStatusLine?: string; // branch mode: the IF's Status at the base, when the branch changed it
   attention?: Attention; // branch mode: needs the human's judgment, or routine
   source: SourceRef;
   changes?: FileChange[];
@@ -98,7 +101,7 @@ export type LedgerRow = {
   id: string;
   entry: string;
   title: string;
-  status: SfStatus;
+  status: IfStatus;
   slices: string[];
   source: SourceRef;
   statusLine?: string;
@@ -339,8 +342,8 @@ export function validatePacket(v: unknown): Result<Packet> {
       const kindOk = c.string(it.kind, `${p}.kind`, { nonEmpty: true });
       c.optString(it.category, `${p}.category`);
       c.string(it.title, `${p}.title`, { nonEmpty: true });
-      if (it.status !== undefined || (kindOk && it.kind === 'sf')) {
-        c.oneOf(it.status, SF_STATUSES, `${p}.status`);
+      if (it.status !== undefined || (kindOk && isIntentFeedback(it.kind as string))) {
+        c.oneOf(it.status, IF_STATUSES, `${p}.status`);
       }
       c.optString(it.statusLine, `${p}.statusLine`);
       c.optString(it.baseStatusLine, `${p}.baseStatusLine`);
@@ -424,7 +427,7 @@ export function validatePacket(v: unknown): Result<Packet> {
       c.string(row.id, `${p}.id`, { nonEmpty: true });
       c.string(row.entry, `${p}.entry`, { nonEmpty: true });
       c.string(row.title, `${p}.title`, { nonEmpty: true });
-      c.oneOf(row.status, SF_STATUSES, `${p}.status`);
+      c.oneOf(row.status, IF_STATUSES, `${p}.status`);
       if (c.array(row.slices, `${p}.slices`)) {
         row.slices.forEach((s, j) => {
           c.string(s, `${p}.slices[${j}]`);

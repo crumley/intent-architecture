@@ -5,9 +5,9 @@
 //
 // Two modes (design 0001, "Two modes"):
 //   main   — the repository as it stands (working tree, or a git ref): every open
-//            SF and every cross-cutting open question.
+//            intent-feedback item (IF) and every cross-cutting open question.
 //   branch — a branch against its base (base...head): every changed intent file,
-//            every SF the branch raises or re-statuses, every changed decision and
+//            every IF the branch raises or re-statuses, every changed decision and
 //            design entry, each carrying its diff.
 
 import { execFileSync } from 'node:child_process';
@@ -16,6 +16,7 @@ import { basename, join, posix, relative, sep } from 'node:path';
 import {
   type ChangeStatus,
   type FileChange,
+  type IfStatus,
   type Item,
   type LedgerRow,
   PACKET_KIND,
@@ -23,7 +24,6 @@ import {
   type Ref,
   type RepoFile,
   type Section,
-  type SfStatus,
 } from './schema.ts';
 
 export type ScanOptions = {
@@ -43,7 +43,11 @@ export type ScanOptions = {
 export const MAX_FILE_BYTES = 1024 * 1024;
 export type ScanResult = { packet: Packet; warnings: string[] };
 
-const SF_HEADING = /^#{2,3}\s+(SF-\d+)\s*(?:[—–:-]+\s*(.*))?$/;
+// Intent feedback: `intent-feedback.md` with `IF-NNN`, or the legacy `spec-feedback.md` with
+// `SF-NNN` (the vocabulary before the rename). Ids are normalized to IF; source text keeps its spelling.
+const SF_HEADING = /^#{2,3}\s+((?:IF|SF)-\d+)\s*(?:[—–:-]+\s*(.*))?$/;
+const FEEDBACK_FILE = /^design\/(\d{4}-[^/]+)\/(?:intent|spec)-feedback\.md$/;
+const normalizeIf = (id: string) => id.replace(/^SF-/, 'IF-');
 const BULLET = /^- \*\*([^*]+?):\*\*\s?(.*)$/;
 const LINK = /\]\(([^)\s]+)\)/g;
 const OPEN_QUESTIONS = 'intent/00-foundation/open-questions.md';
@@ -139,7 +143,7 @@ export function snapshot(
 function allSfs(tree: Tree, intent: Map<string, string>, warnings: string[]): ParsedSf[] {
   const out: ParsedSf[] = [];
   for (const path of tree.list('design/')) {
-    const m = /^design\/(\d{4}-[^/]+)\/spec-feedback\.md$/.exec(path);
+    const m = FEEDBACK_FILE.exec(path);
     if (!m || (m[1] as string).startsWith('0000-')) continue;
     const parsed = parseSpecFeedback(tree.read(path) ?? '', path, m[1] as string, intent);
     warnings.push(...parsed.warnings);
@@ -207,9 +211,9 @@ function scanBranch(root: string, base: string, opts: ScanOptions): ScanResult {
     items.push(item);
   }
 
-  // 2. Spec-feedback the branch raises, re-statuses, or rewrites.
+  // 2. Intent feedback the branch raises, re-statuses, or rewrites.
   const baseIntent = new Map(readIntent(baseTree).map((f) => [f.path, f.text]));
-  for (const c of changed.filter((x) => /^design\/\d{4}-[^/]+\/spec-feedback\.md$/.test(x.path))) {
+  for (const c of changed.filter((x) => FEEDBACK_FILE.test(x.path))) {
     if (c.status === 'deleted') continue;
     const entry = c.path.split('/')[1] as string;
     const now = parseSpecFeedback(head.read(c.path) ?? '', c.path, entry, intentText);
@@ -326,7 +330,7 @@ function intentLinks(text: string, path: string, intent: Map<string, string>): R
 }
 
 // ---------------------------------------------------------------------------
-// Spec-feedback files
+// Intent-feedback files (and legacy spec-feedback files)
 
 export type ParsedSf = { row: LedgerRow; item: Item; body: string };
 
@@ -341,7 +345,12 @@ export function parseSpecFeedback(
   const heads: { i: number; id: string; title: string }[] = [];
   lines.forEach((l, i) => {
     const m = SF_HEADING.exec(l);
-    if (m) heads.push({ i, id: m[1] as string, title: (m[2] ?? '').trim() || (m[1] as string) });
+    if (m)
+      heads.push({
+        i,
+        id: normalizeIf(m[1] as string),
+        title: (m[2] ?? '').trim() || (m[1] as string),
+      });
   });
   const firstHead = heads[0]?.i ?? lines.length;
   const preamble = lines.slice(1, firstHead).join('\n').trim();
@@ -385,7 +394,7 @@ export function parseSpecFeedback(
     if (statusLine) row.statusLine = statusLine;
     const item: Item = {
       id,
-      kind: 'sf',
+      kind: 'if',
       title: h.title,
       status: sfStatus,
       source,
@@ -431,7 +440,7 @@ export function keyOf(label: string): string {
   return l.replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
 
-export function classifyStatus(line: string | undefined): SfStatus {
+export function classifyStatus(line: string | undefined): IfStatus {
   if (!line) return 'pending';
   const s = line.replace(/`/g, '').trim().toLowerCase();
   if (s.startsWith('adjudicated')) return 'adjudicated';
@@ -463,7 +472,7 @@ function slicePassages(text: string, sfPath: string, intent: Map<string, string>
 }
 
 /**
- * The exact source text matching a quote cited in an SF, if one can be found:
+ * The exact source text matching a quote cited in an IF, if one can be found:
  * the whole quote or, for an elided quote ("a … b"), its longest fragment —
  * matched across line wrapping, returned as the file's own text.
  */
@@ -477,7 +486,7 @@ export function findQuote(file: string, quotes: string[]): string | undefined {
         .map((w) => w.replace(/[*_`]/g, ''))
         .filter(Boolean);
       if (words.length < 3) continue;
-      // Emphasis markers may sit on either side of any word, in the SF or the file.
+      // Emphasis markers may sit on either side of any word, in the IF or the file.
       const esc = words.map((w) => `[*_\`]*${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[*_\`]*`);
       const m = new RegExp(esc.join('\\s+'), 'i').exec(file);
       if (m && (!best || m[0].length > best.length)) best = m[0];

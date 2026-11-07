@@ -1,7 +1,7 @@
 // The review page: vanilla TypeScript + DOM, no framework. One state object;
 // discrete actions re-render, typing only updates state; every change autosaves
 // the draft. Views: queue (an item beside its evidence), files (the whole
-// snapshot), dashboard (every SF), and review & submit; a session drawer lists
+// snapshot), dashboard (every IF), and review & submit; a session drawer lists
 // everything decided so far.
 
 import { createSelector, lineOf, locate } from '../anchor.ts';
@@ -12,6 +12,7 @@ import {
   type AnnotationTarget,
   type FileChange,
   type Item,
+  isIntentFeedback,
   type LedgerRow,
   OVERALL,
   type OverallKind,
@@ -165,7 +166,8 @@ const verdictOf = (id: string) => S.review.verdicts.find((v) => v.item === id);
 const itemById = (id: string) => items().find((i) => i.id === id);
 
 const KIND_LABEL: Record<string, string> = {
-  sf: 'Spec-feedback',
+  if: 'Intent feedback',
+  sf: 'Intent feedback',
   question: 'Open question',
   'intent-change': 'Intent change',
   'design-entry': 'Design entry',
@@ -185,8 +187,8 @@ function verdictLabel(it: Item, v: VerdictKind): string {
 }
 
 function shortId(id: string): string {
-  const m = /^(\d{4})-[^/]*\/(SF-\d+)$/.exec(id);
-  if (m) return `${m[1]} ${m[2]}`;
+  const m = /^(\d{4})-[^/]*\/(?:IF|SF)-(\d+)$/.exec(id);
+  if (m) return `${m[1]} IF-${m[2]}`;
   const adr = /(?:^|\/)decisions\/(\d{4})-/.exec(id);
   if (adr) return `ADR ${adr[1]}`;
   const entry = /^design\/(\d{4})-[^/]+$/.exec(id);
@@ -458,7 +460,7 @@ function excerpt(r: Ref): HTMLElement | null {
   );
 }
 
-/** Item text (an SF's friction, etc.): prose, annotatable against the item. */
+/** Item text (an IF's friction, etc.): prose, annotatable against the item. */
 function itemText(it: Item, key: string, text: string): HTMLElement {
   return proseView(text, {
     target: { kind: 'item', item: it.id, section: key },
@@ -716,7 +718,7 @@ const VIEW_TIP: Record<View, string> = {
     'Queue — the items needing your ruling, one at a time, with the intent they touch beside them.',
   files: 'Files — every file in the snapshot (intent, design, code), to read and to note anywhere.',
   dashboard:
-    'Dashboard — every spec-feedback item in the repository, by status and by the intent slice it questions.',
+    'Dashboard — every intent-feedback item (IF) in the repository, by status and by the intent slice it questions.',
   submit:
     'Review & submit — look over every ruling and note from this session, then hand them back to the agent.',
 };
@@ -1002,7 +1004,7 @@ function filePeek(r: Ref | Focus): HTMLElement | null {
   return h('div', { class: 'peek' }, h('div', { class: 'peek-head mono' }, r.path), body);
 }
 
-/** Title, status, and first sentence of a Markdown document (or of one SF block). */
+/** Title, status, and first sentence of a Markdown document (or of one IF block). */
 function mdSummary(text: string): { title?: string; status?: string; summary?: string } {
   const out: { title?: string; status?: string; summary?: string } = {};
   const h1 = /^#{1,3}\s+(.+)$/m.exec(text);
@@ -1031,7 +1033,8 @@ function clean(t: string): string {
 
 function sfBlock(path: string, sfId: string): string {
   const text = fileText(path) ?? '';
-  const at = text.search(new RegExp(`^#{2,3}\\s+${sfId}\\b`, 'm'));
+  const n = sfId.replace(/^(?:IF|SF)-/, '');
+  const at = text.search(new RegExp(`^#{2,3}\\s+(?:IF|SF)-${n}\\b`, 'm'));
   if (at < 0) return '';
   const rest = text.slice(at);
   const next = rest.slice(3).search(/^#{1,3}\s/m);
@@ -1049,7 +1052,7 @@ type LinkTarget = {
 
 function resolveLink(link: string): LinkTarget | null {
   const [kind, rest = ''] = [link.slice(0, link.indexOf(':')), link.slice(link.indexOf(':') + 1)];
-  if (kind === 'sf') {
+  if (kind === 'if') {
     const row = (S.packet.ledger ?? []).find((r) => r.id === rest);
     const i = items().findIndex((x) => x.id === rest);
     const it = items()[i];
@@ -1379,14 +1382,14 @@ function homeView(): HTMLElement {
   };
   const asks: [string, string, (i: Item) => boolean][] = [
     [
-      'Spec-feedback to rule on',
-      'Frictions a build found in the intent, each with a proposed revision.',
-      (i) => i.kind === 'sf' && i.status !== 'ruled',
+      'Intent feedback to rule on',
+      'IFs — intent-feedback items: frictions a build found in the intent, each with a proposed revision.',
+      (i) => isIntentFeedback(i.kind) && i.status !== 'ruled',
     ],
     [
       'Rulings awaiting their wording',
       'Already ruled; confirm the words that land the ruling in the intent.',
-      (i) => i.kind === 'sf' && i.status === 'ruled',
+      (i) => isIntentFeedback(i.kind) && i.status === 'ruled',
     ],
     [
       'Open questions',
@@ -1411,7 +1414,9 @@ function homeView(): HTMLElement {
     [
       'Findings',
       'Things an agent noticed that need your judgment.',
-      (i) => !['sf', 'question', 'decision', 'intent-change', 'design-entry'].includes(i.kind),
+      (i) =>
+        !isIntentFeedback(i.kind) &&
+        !['question', 'decision', 'intent-change', 'design-entry'].includes(i.kind),
     ],
   ];
   const ruled = S.review.verdicts.length;
@@ -1551,7 +1556,7 @@ function homeView(): HTMLElement {
           'li',
           {},
           h('strong', {}, 'Follow the identifiers. '),
-          'SF numbers, entry numbers like 0031, ADRs, and file paths are links: hover to peek, click to go.',
+          'IF numbers (and older SF numbers), entry numbers like 0031, ADRs, and file paths are links: hover to peek, click to go.',
         ),
         h(
           'li',
@@ -1815,7 +1820,7 @@ function queueRow(it: Item, i: number): HTMLElement {
         { class: 'qmeta' },
         h('span', { class: 'mono' }, shortId(it.id)),
         it.status === 'ruled' ? h('span', { class: 'tag ruled' }, 'ruled') : null,
-        it.kind !== 'sf' ? h('span', { class: 'tag' }, kindLabel(it)) : null,
+        !isIntentFeedback(it.kind) ? h('span', { class: 'tag' }, kindLabel(it)) : null,
       ),
       h('span', { class: 'qt' }, it.title),
     ),
@@ -1876,7 +1881,7 @@ function queueView(): HTMLElement {
 
 /**
  * Progressive disclosure: the summary, the proposal, the analysis, and the
- * ruling are open; an SF's supporting fields start folded. Any fold the
+ * ruling are open; an IF's supporting fields start folded. Any fold the
  * reviewer opens or closes stays that way for the session (by section key).
  */
 const FOLDED_BY_DEFAULT = new Set([
@@ -2008,7 +2013,9 @@ function itemDetail(it: Item): HTMLElement {
       : null,
     it.evidence.length
       ? collapsible(
-          it.kind === 'sf' || it.kind === 'question' ? 'The intent in question' : 'Evidence',
+          isIntentFeedback(it.kind) || it.kind === 'question'
+            ? 'The intent in question'
+            : 'Evidence',
           h(
             'div',
             {},
@@ -2044,7 +2051,7 @@ function itemDetail(it: Item): HTMLElement {
           h(
             'div',
             { class: 'eyebrow' },
-            it.kind === 'sf' ? 'The spec-feedback as written' : 'Detail',
+            isIntentFeedback(it.kind) ? 'The intent feedback as written' : 'Detail',
           ),
           sections.map((s) =>
             collapsible(
@@ -2763,11 +2770,11 @@ function dashboardView(): HTMLElement {
     h(
       'div',
       { class: 'page-inner' },
-      h('h1', {}, 'Spec-feedback across the repository'),
+      h('h1', {}, 'Intent feedback across the repository'),
       h(
         'p',
         { class: 'lead' },
-        'Every SF in every design entry, by where it stands and by the intent slice it questions.',
+        'Every intent-feedback item (IF) in every design entry, by where it stands and by the intent slice it questions.',
       ),
       ledger.length === 0 ? h('p', { class: 'muted' }, 'The packet carries no ledger.') : null,
       h(

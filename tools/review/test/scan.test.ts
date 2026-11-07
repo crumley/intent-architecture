@@ -3,11 +3,11 @@ import { execFileSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { classifyStatus, findQuote, parseNameStatus, scanRepo } from '../src/scan.ts';
-import { type SfStatus, validatePacket } from '../src/schema.ts';
+import { type IfStatus, validatePacket } from '../src/schema.ts';
 import { tree } from './fixtures.ts';
 
 // Each row: a Status line as written -> how the scanner classifies it.
-const STATUS: [string | undefined, SfStatus][] = [
+const STATUS: [string | undefined, IfStatus][] = [
   [undefined, 'pending'],
   ['pending.', 'pending'],
   ['`pending`', 'pending'],
@@ -62,9 +62,10 @@ describe('main mode', () => {
 
   test('items: pending and ruled SFs, then the cross-cutting open questions', () => {
     expect(packet.items.map((i) => [i.id, i.kind, i.status])).toEqual([
-      ['0001-alpha/SF-001', 'sf', 'pending'],
-      ['0001-alpha/SF-002', 'sf', 'ruled'],
-      ['0001-alpha/SF-005', 'sf', 'pending'],
+      ['0001-alpha/IF-001', 'if', 'pending'],
+      ['0001-alpha/IF-002', 'if', 'ruled'],
+      ['0001-alpha/IF-005', 'if', 'pending'],
+      ['0003-modern/IF-001', 'if', 'pending'],
       ['OQ/who-owns-the-cadence', 'question', 'pending'],
       ['design/decisions/0002-pending.md', 'decision', undefined],
     ]);
@@ -72,11 +73,12 @@ describe('main mode', () => {
 
   test('the ledger holds every SF, settled ones included', () => {
     expect(packet.ledger?.map((r) => [r.id, r.status, r.slices])).toEqual([
-      ['0001-alpha/SF-001', 'pending', ['intent/02-subsystems/00-seam.md']],
-      ['0001-alpha/SF-002', 'ruled', ['intent/02-subsystems/00-seam.md']],
-      ['0001-alpha/SF-003', 'adjudicated', []],
-      ['0001-alpha/SF-004', 'declined', []],
-      ['0001-alpha/SF-005', 'pending', []],
+      ['0001-alpha/IF-001', 'pending', ['intent/02-subsystems/00-seam.md']],
+      ['0001-alpha/IF-002', 'ruled', ['intent/02-subsystems/00-seam.md']],
+      ['0001-alpha/IF-003', 'adjudicated', []],
+      ['0001-alpha/IF-004', 'declined', []],
+      ['0001-alpha/IF-005', 'pending', []],
+      ['0003-modern/IF-001', 'pending', ['intent/02-subsystems/00-seam.md']],
     ]);
   });
 
@@ -97,6 +99,9 @@ describe('main mode', () => {
         quote: 'back to a live session for resume',
       },
     ]);
+    // Ids normalize to IF; the source keeps its own spelling, so anchors and quotes still match.
+    const src = REPO['design/0001-alpha/spec-feedback.md'].split('\n')[(sf?.source.line ?? 1) - 1];
+    expect([sf?.id, src]).toEqual(['0001-alpha/IF-001', '## SF-001 — resume conflates attach']);
     expect(packet.items[1]?.statusLine).toBe(
       'pending — ruled by Rae 2026-11-06, awaiting the intent edit: shared.',
     );
@@ -173,8 +178,8 @@ describe('branch mode', () => {
   test('items: intent changes, SFs raised or re-statused, decisions, design entries — in that order', () => {
     expect(packet.items.map((i) => [i.id, i.kind, i.attention ?? null])).toEqual([
       ['intent-change/intent/02-subsystems/00-seam.md', 'intent-change', 'judgment'],
-      ['0001-alpha/SF-002', 'sf', 'judgment'],
-      ['0001-alpha/SF-006', 'sf', 'judgment'],
+      ['0001-alpha/IF-002', 'if', 'judgment'],
+      ['0001-alpha/IF-006', 'if', 'judgment'],
       ['design/decisions/0001-tool.md', 'decision', null],
       ['design/(other)', 'design-entry', null],
       ['design/0001-alpha', 'design-entry', null],
@@ -261,6 +266,14 @@ const REPO = {
 Just a paragraph, no labelled bullets.
 `,
   'design/0000-template/spec-feedback.md': '## SF-001 — <template, skipped>\n',
+  // The renamed convention: intent-feedback.md with IF ids (0001-alpha above is the legacy spelling).
+  'design/0003-modern/intent-feedback.md': `# 0003 — Intent feedback
+
+## IF-001 — written in the new vocabulary
+
+- **Slice:** [\`seam\`](../../intent/02-subsystems/00-seam.md), _Constraints_.
+- **Friction:** read the same way.
+`,
   'design/decisions/0001-settled.md':
     '# 0001 — Settled choice\n\n> **Status:** accepted · **Date:** 2026-01-01\n',
   'design/decisions/0002-pending.md':

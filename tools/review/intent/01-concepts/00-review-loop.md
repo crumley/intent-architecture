@@ -42,17 +42,17 @@ settling — or at a **change** to it: a branch against its base, before it merg
 moves forward through merges, and a merge is fastest when the human has already seen exactly what
 the change does to the intent; and what has already merged still accumulates open items that no
 change will surface. A change review shows **diffs, not just final text**, separates what needs the
-human's **judgment** (new or changed intent, new spec-feedback, contested decisions) from what is
+human's **judgment** (new or changed intent, new intent feedback, contested decisions) from what is
 **routine**, and ends with an **overall verdict** on the change — approve, request changes, or
 comment only — that the agent can act on.
 
 ## Items and verdicts
 
-An **item** is one thing a ruling is asked for: a spec-feedback item, an open question, an undecided
-decision, a change to an intent file or a design entry, or a finding a producer made. The kinds are
-an open vocabulary — a new producer may bring a new kind — because what the human does with an item
-does not depend on where it came from. A **verdict** is the ruling, one of five, each a distinct act
-with a distinct outcome so the agent never has to guess which was meant:
+An **item** is one thing a ruling is asked for: an intent-feedback item, an open question, an
+undecided decision, a change to an intent file or a design entry, or a finding a producer made. The
+kinds are an open vocabulary — a new producer may bring a new kind — because what the human does
+with an item does not depend on where it came from. A **verdict** is the ruling, one of five, each a
+distinct act with a distinct outcome so the agent never has to guess which was meant:
 
 | Verdict     | The human means                                    | What must follow                                                        |
 | ----------- | -------------------------------------------------- | ----------------------------------------------------------------------- |
@@ -68,7 +68,7 @@ back next iteration, the other waits. An item left without a verdict is simply u
 as it is and is offered again.
 
 **Adjudication is still the merge.** A verdict is a ruling, not the settlement: in the intent
-architecture an SF is settled when the intent change carrying it merges. So accept and amend produce
+architecture an IF is settled when the intent change carrying it merges. So accept and amend produce
 a change for review and record the item as ruled-and-awaiting; only the merge settles it. _Why:_ the
 tool must not move the moment of adjudication out of history and into a local file.
 

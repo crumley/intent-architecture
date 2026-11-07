@@ -21,9 +21,10 @@ skeleton rather than a local copy, so this subproject carries no second template
 - [`0002-single-file-node-bundle.md`](decisions/0002-single-file-node-bundle.md) — ship one
   committed, drift-checked file that runs under plain Node.
 
-## Finding open spec-feedback
+## Finding open intent feedback
 
-As in any intent-architecture repository, the entries are the queue:
+As in any intent-architecture repository, the entries are the queue (the grep reads
+`intent-feedback.md` and the legacy `spec-feedback.md` alike):
 
 ```sh
 grep -rn -e '\*\*Status:\*\* *`\?pending' -e '`pending`\.' design/*/
