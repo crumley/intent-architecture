@@ -49,8 +49,9 @@ long as this contract holds.
 
 - **Not a channel for the tool to act.** The decisions describe what the human ruled; carrying them
   out is entirely the agent's.
-- **Not a schema for the repository's own files.** How IFs and Status lines are written is the
-  intent architecture's convention; the packet carries their text, it does not redefine it.
+- **Not a schema for the repository's own files.** How intent-feedback items and Status lines are
+  written is the intent architecture's convention; the packet carries their text, it does not
+  redefine it.
 
 ## Canonical home for
 

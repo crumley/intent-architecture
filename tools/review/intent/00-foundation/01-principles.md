@@ -48,10 +48,10 @@ honor these; they do not restate them.
    editor; a surface people avoid is a backlog that grows.
 10. **Everything explains itself and everything links.** Every control says what it does when asked
     (hover or focus), without being in the way when not; the home page teaches the whole surface;
-    and every identifier a reader meets — an IF number, a design entry, a decision, a file path —
-    resolves to what it names, with a peek before the jump. _Why:_ an intent-architecture repository
-    is a web of numbered, cross-referenced pieces, and a reader who must remember what "IF-005" or
-    "0031" means is a reader doing the tool's job.
+    and every identifier a reader meets — an intent-feedback id, a design entry, a decision, a file
+    path — resolves to what it names, with a peek before the jump. _Why:_ an intent-architecture
+    repository is a web of numbered, cross-referenced pieces, and a reader who must remember what
+    "IF-005" or "0031" means is a reader doing the tool's job.
 
 ## Canonical home for
 

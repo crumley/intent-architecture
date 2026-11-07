@@ -99,7 +99,7 @@ describe('main mode', () => {
         quote: 'back to a live session for resume',
       },
     ]);
-    // Ids normalize to IF; the source keeps its own spelling, so anchors and quotes still match.
+    // Ids normalize to `IF-NNN`; the source keeps its own spelling, so anchors and quotes still match.
     const src = REPO['design/0001-alpha/spec-feedback.md'].split('\n')[(sf?.source.line ?? 1) - 1];
     expect([sf?.id, src]).toEqual(['0001-alpha/IF-001', '## SF-001 — resume conflates attach']);
     expect(packet.items[1]?.statusLine).toBe(
@@ -266,7 +266,7 @@ const REPO = {
 Just a paragraph, no labelled bullets.
 `,
   'design/0000-template/spec-feedback.md': '## SF-001 — <template, skipped>\n',
-  // The renamed convention: intent-feedback.md with IF ids (0001-alpha above is the legacy spelling).
+  // The renamed convention: intent-feedback.md with `IF-NNN` ids (0001-alpha above is the legacy spelling).
   'design/0003-modern/intent-feedback.md': `# 0003 — Intent feedback
 
 ## IF-001 — written in the new vocabulary

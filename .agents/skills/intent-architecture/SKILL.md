@@ -370,9 +370,9 @@ to install; `<skill-dir>` is this skill's directory). The loop:
    human rules on each item (accept, amend, decline, defer, revise), annotates any file, and
    submits.
 3. **Carry out** the decisions: intent edits in their own change, never bundled with design or build
-   work; each IF's Status line (an IF is an intent-feedback item) updated (ruled-and-awaiting until
-   the intent change merges, then adjudicated; or declined with the human's why); every note acted
-   on; a branch's overall verdict honoured.
+   work; each intent-feedback item's Status line updated (ruled-and-awaiting until the intent change
+   merges, then adjudicated; or declined with the human's why); every note acted on; a branch's
+   overall verdict honoured.
 4. **Iterate** with a smaller packet until nothing comes back.
 
 The full procedure — producers, packet fields, the Status wording for every outcome, and what each

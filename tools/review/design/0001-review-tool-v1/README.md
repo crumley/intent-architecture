@@ -51,11 +51,12 @@ It is the first entry; it establishes the toolchain
   - The **packet** and **decisions** schemas, version 1, with one set of validators shared by the
     server, the page, and a `validate` command.
   - **`scan`**, drafting a packet in either mode. _Main_ (the open-items producer): every pending
-    and ruled-but-pending IF, the cross-cutting open questions, and ADRs still `proposed`. _Branch_
-    (base...head): every changed intent file, every IF the branch raises, re-statuses, or rewrites,
-    every changed ADR, and every changed design entry, each with its diff. Both snapshot the
-    repository's tracked text files and build the IF ledger. The agent then adds what only it can
-    write: exact quotes, proposed edits, analysis, recommendations, triage.
+    and ruled-but-pending intent-feedback item, the cross-cutting open questions, and ADRs still
+    `proposed`. _Branch_ (base...head): every changed intent file, every intent-feedback item the
+    branch raises, re-statuses, or rewrites, every changed ADR, and every changed design entry, each
+    with its diff. Both snapshot the repository's tracked text files and build the intent-feedback
+    item ledger. The agent then adds what only it can write: exact quotes, proposed edits, analysis,
+    recommendations, triage.
   - **`serve`**: the page on `127.0.0.1` behind a per-run token, a draft autosaved beside the
     decisions file, submit-then-exit, abandon-then-exit.
   - **`locate`**, re-finding each submitted note in the repository's current files.
@@ -63,11 +64,12 @@ It is the first entry; it establishes the toolchain
     view, ruling, note kind, and key), the **queue** (item, evidence excerpts, and the cited files
     beside it; supporting detail folded; the ruling dock with the consequences pinned at its foot),
     the **files** browser (the whole snapshot, prose or highlighted code), the **dashboard** (every
-    IF by status and by slice), **review & submit**, and a **session drawer** listing every ruling
-    and note made this sitting, each jumping back to where it was made, editable and removable.
-  - **Linked identifiers** in every rendered surface — IF ids, design entry numbers, ADRs,
-    repository paths, Markdown links — each with a peek (title, status, one-line summary) on hover
-    or focus, and followed on click.
+    intent-feedback item by status and by slice), **review & submit**, and a **session drawer**
+    listing every ruling and note made this sitting, each jumping back to where it was made,
+    editable and removable.
+  - **Linked identifiers** in every rendered surface — intent-feedback ids, design entry numbers,
+    ADRs, repository paths, Markdown links — each with a peek (title, status, one-line summary) on
+    hover or focus, and followed on click.
   - **Delayed tooltips** on every view, ruling, note kind, and header control, shown on keyboard
     focus too.
   - **Themes**: six built-in (four from the Gyokuro family, a neutral pair), custom themes as JSON
@@ -91,8 +93,8 @@ It is the first entry; it establishes the toolchain
     orphaned note still carries everything the agent needs to act on it by reading.
   - **Linking the repository's own numbering schemes** — principle numbers (`§16`), walkthrough
     steps, and other conventions a particular repository invents. Safe to defer because the
-    architecture's own identifiers (IFs, entries, ADRs, paths) are linked, and a repository-specific
-    scheme needs a declared convention to resolve rather than a guess.
+    architecture's own identifiers (intent-feedback ids, entries, ADRs, paths) are linked, and a
+    repository-specific scheme needs a declared convention to resolve rather than a guess.
   - **A theme editor in the page** — themes are written as JSON files. Safe because a theme is a
     dozen lines a person writes once, and the picker shows where to put it and links the format.
   - **A review timeout, live reload of a changed packet, full-text search, forge state** — each a
@@ -105,11 +107,11 @@ It is the first entry; it establishes the toolchain
   2. `mise run check` and `mise run template-check` at the repository root stay green.
   3. The end-to-end tests run the committed bundle under the pinned Node 20: serve a fixture packet
      in each mode, submit over HTTP, see exit 0 and valid decisions; abandon and a signal exit 3.
-  4. A packet from a real repository — its pending IFs across two design entries and a proposed ADR
-     — is served by the bundle in each mode; the page, the packet, and a draft round-trip answer
-     over HTTP; an invalid submission is refused with each error named and the review stays open; a
-     valid one, with notes on intent, on an item's text, and on source code, writes decisions that
-     `validate` accepts and `locate` re-finds.
+  4. A packet from a real repository — its pending intent-feedback items across two design entries
+     and a proposed ADR — is served by the bundle in each mode; the page, the packet, and a draft
+     round-trip answer over HTTP; an invalid submission is refused with each error named and the
+     review stays open; a valid one, with notes on intent, on an item's text, and on source code,
+     writes decisions that `validate` accepts and `locate` re-finds.
   5. Rendered in a headless browser in light and dark themes at two widths, every view reads
      cleanly; a selection at the right edge of the side pane keeps its toolbar inside the viewport;
      a tooltip and an identifier peek appear and stay inside it; the ruling dock is fully visible.
@@ -145,10 +147,11 @@ It is the first entry; it establishes the toolchain
   parser; multi-line strings and some edge syntax render plain.
 - **The scanner is in the tool.** _Alternative:_ the agent assembles packets by reading files.
   _Attractive_ because it keeps the tool to rendering. _Lost_ because the mechanical half — finding
-  IFs, reading their fields and Status, diffing a branch, snapshotting files, building the ledger —
-  is deterministic, and doing it in code makes every packet consistent and frees the agent for the
-  half that is judgment. The scanner never writes analysis. _Cost:_ it follows the IF convention's
-  text shape; an unusual IF degrades to a one-section item rather than failing.
+  intent-feedback items, reading their fields and Status, diffing a branch, snapshotting files,
+  building the ledger — is deterministic, and doing it in code makes every packet consistent and
+  frees the agent for the half that is judgment. The scanner never writes analysis. _Cost:_ it
+  follows the intent-feedback convention's text shape; an unusual intent-feedback item degrades to a
+  one-section item rather than failing.
 - **The snapshot is the repository's tracked text.** `scan` reads `git ls-files` (cached plus
   untracked-not-ignored) for a working tree, or the tree of a ref, so `.gitignore` is honoured;
   binaries and files over 1 MiB are listed as omitted, never inlined. `--files intent` narrows it.
@@ -166,15 +169,15 @@ It is the first entry; it establishes the toolchain
   survive one review. _Cost:_ the tool writes one small file outside the repository, only when the
   reader picks a theme.
 - **Identifiers resolve against the packet, by pattern and context.** `IF-NNN` (or the legacy
-  `SF-NNN`, an alias) resolves within the design entry of the text it appears in (an IF's own text,
-  a file under `design/NNNN-…/`), or with an explicit entry (`0051 IF-001`, `0031/IF-005`), or —
-  with no context — when the number is unique among the items under review; `NNNN` resolves to a
-  design entry or ADR that exists; paths and Markdown links resolve relative to the text's own file,
-  then from the root. Anything that does not resolve stays plain text. _Alternative:_ require
-  producers to mark links in the packet. _Attractive_ because it is exact. _Lost_ because the text
-  that matters most — intent and design files — is written by people, not producers. _Cost:_ a false
-  link is possible where a four-digit number happens to match an entry; it is visibly a link and its
-  peek says what it is.
+  `SF-NNN`, an alias) resolves within the design entry of the text it appears in (an intent-feedback
+  item's own text, a file under `design/NNNN-…/`), or with an explicit entry (`0051 IF-001`,
+  `0031/IF-005`), or — with no context — when the number is unique among the items under review;
+  `NNNN` resolves to a design entry or ADR that exists; paths and Markdown links resolve relative to
+  the text's own file, then from the root. Anything that does not resolve stays plain text.
+  _Alternative:_ require producers to mark links in the packet. _Attractive_ because it is exact.
+  _Lost_ because the text that matters most — intent and design files — is written by people, not
+  producers. _Cost:_ a false link is possible where a four-digit number happens to match an entry;
+  it is visibly a link and its peek says what it is.
 - **Tooltips are the page's own, delayed.** Every view, ruling, note kind, and header control
   carries a description, shown after ~700 ms of hover or at once on keyboard focus, placed inside
   the viewport. _Alternative:_ the native `title` attribute. _Lost_ because it cannot be styled, its
@@ -227,7 +230,7 @@ type Packet = {
   items: Item[];
   files: { path: string; text: string }[]; // the snapshot, repo-relative paths
   omitted?: { path: string; reason: string }[]; // tracked files left out (binary, too large)
-  ledger?: LedgerRow[]; // every IF in the repository, for the dashboard
+  ledger?: LedgerRow[]; // every intent-feedback item in the repository, for the dashboard
 };
 
 type Item = {
@@ -360,19 +363,20 @@ API — and a loopback `Host`): `GET /` the page · `GET /api/packet` · `GET`/`
 
 - **Scanning, main mode.** Every `design/*/intent-feedback.md` — and every legacy
   `design/*/spec-feedback.md`, from before the vocabulary became _intent feedback_ — is split at
-  `## IF-NNN — <title>` (or `## SF-NNN`; ids normalize to IF, the source keeps its spelling); each
-  `- **<Label>:** <text>` bullet becomes a section, the **Slice** bullet also yielding its links
-  into `intent/` (resolved from the entry's directory), its italic section name, and — matched
+  `## IF-NNN — <title>` (or `## SF-NNN`; ids normalize to `IF-NNN`, the source keeps its spelling);
+  each `- **<Label>:** <text>` bullet becomes a section, the **Slice** bullet also yielding its
+  links into `intent/` (resolved from the entry's directory), its italic section name, and — matched
   across hard wraps and emphasis markers — the source text of its quoted words as evidence. The
-  Status bullet classifies the IF: absent or `pending` → pending; `pending — ruled …` → ruled;
-  `adjudicated …` and `declined …` → settled, ledger only. The cross-cutting bullets before
-  `open-questions.md`'s index become question items; ADRs whose Status is `proposed` become decision
-  items.
+  Status bullet classifies the intent-feedback item: absent or `pending` → pending;
+  `pending — ruled …` → ruled; `adjudicated …` and `declined …` → settled, ledger only. The
+  cross-cutting bullets before `open-questions.md`'s index become question items; ADRs whose Status
+  is `proposed` become decision items.
 - **Scanning, branch mode.** `git diff --name-status -M <merge-base> <head> -- intent design` lists
-  the changes; each carries its own `git diff`. Intent changes are `judgment`; an IF the branch
-  raised, re-statused (with `baseStatusLine`), or rewrote is `judgment` with an "on this branch"
-  note; ADRs and design entries (one item per entry directory, with the intent its README links as
-  context) are left for the agent to triage. The snapshot and ledger are read at head.
+  the changes; each carries its own `git diff`. Intent changes are `judgment`; an intent-feedback
+  item the branch raised, re-statused (with `baseStatusLine`), or rewrote is `judgment` with an "on
+  this branch" note; ADRs and design entries (one item per entry directory, with the intent its
+  README links as context) are left for the agent to triage. The snapshot and ledger are read at
+  head.
 - **Anchors.** A selector keeps up to 32 characters each side of the quote. Re-location takes every
   occurrence of `exact`, scores each by agreement with `prefix` and `suffix`, breaks ties by
   nearness to the `at` hint; with none, it looks for the prefix followed closely by the suffix and
@@ -390,15 +394,16 @@ API — and a loopback `Host`): `GET /` the page · `GET /api/packet` · `GET`/`
   and tooltips share one placement rule: above or below the anchor, flipped when there is no room,
   clamped inside the viewport. The queue orders branch reviews judgment first, routine last. An item
   opens with the recommendation and summary, then the proposal and related items; the evidence
-  follows, and an IF's own fields are folded beneath "the intent feedback as written"; any fold's
-  state is kept for the session by section, across items. The ruling dock is pinned to the foot of
-  the item. Branch changes show modified files as highlighted, word-diffed patches and added
-  Markdown files as prose.
+  follows, and an intent-feedback item's own fields are folded beneath "the intent feedback as
+  written"; any fold's state is kept for the session by section, across items. The ruling dock is
+  pinned to the foot of the item. Branch changes show modified files as highlighted, word-diffed
+  patches and added Markdown files as prose.
 - **Links.** `xref` finds identifiers in text against an index built from the packet (files, design
-  entries, ADRs, the ledger's IF ids, the items under review) and emits ranges that the renderer
-  carries like any style, so a link keeps its source offsets and can sit inside an annotation. A
-  peek shows the target's title, status, and first sentence (an IF's friction, a document's
-  opening); a click opens an item, or shows a file beside the item, or in the files view.
+  entries, ADRs, the ledger's intent-feedback ids, the items under review) and emits ranges that the
+  renderer carries like any style, so a link keeps its source offsets and can sit inside an
+  annotation. A peek shows the target's title, status, and first sentence (an intent-feedback item's
+  friction, a document's opening); a click opens an item, or shows a file beside the item, or in the
+  files view.
 - **Keys.** `j`/`k` next/previous (item, or file) · `n` next unreviewed · `a m d f r` the five
   verdicts · `u` clear · `c q s i x` the five note intents on the selection · `1`–`5` home, queue,
   files, dashboard, review & submit · `p` the session drawer · `v` prose/source · `/` filter files ·

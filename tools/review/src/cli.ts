@@ -188,7 +188,7 @@ function cmdScan(flags: Flags, io: Io): number {
     const kinds = [...count.entries()].map(([k, n]) => `${n} ${k}`).join(', ') || 'no items';
     io.out(
       `review: wrote ${out} — ${packet.mode} mode: ${kinds}; ` +
-        `${packet.ledger?.length ?? 0} IFs in the ledger, ${packet.files.length} files`,
+        `${packet.ledger?.length ?? 0} intent-feedback items in the ledger, ${packet.files.length} files`,
     );
   } else {
     io.out(json.trimEnd());

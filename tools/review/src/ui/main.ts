@@ -1,7 +1,7 @@
 // The review page: vanilla TypeScript + DOM, no framework. One state object;
 // discrete actions re-render, typing only updates state; every change autosaves
 // the draft. Views: queue (an item beside its evidence), files (the whole
-// snapshot), dashboard (every IF), and review & submit; a session drawer lists
+// snapshot), dashboard (every intent-feedback item), and review & submit; a session drawer lists
 // everything decided so far.
 
 import { createSelector, lineOf, locate } from '../anchor.ts';
@@ -187,7 +187,7 @@ function verdictLabel(it: Item, v: VerdictKind): string {
 }
 
 function shortId(id: string): string {
-  const m = /^(\d{4})-[^/]*\/(?:IF|SF)-(\d+)$/.exec(id);
+  const m = /^(\d{4})-[^/]*\/[IS]F-(\d+)$/.exec(id);
   if (m) return `${m[1]} IF-${m[2]}`;
   const adr = /(?:^|\/)decisions\/(\d{4})-/.exec(id);
   if (adr) return `ADR ${adr[1]}`;
@@ -460,7 +460,7 @@ function excerpt(r: Ref): HTMLElement | null {
   );
 }
 
-/** Item text (an IF's friction, etc.): prose, annotatable against the item. */
+/** Item text (an intent-feedback item's friction, etc.): prose, annotatable against the item. */
 function itemText(it: Item, key: string, text: string): HTMLElement {
   return proseView(text, {
     target: { kind: 'item', item: it.id, section: key },
@@ -718,7 +718,7 @@ const VIEW_TIP: Record<View, string> = {
     'Queue — the items needing your ruling, one at a time, with the intent they touch beside them.',
   files: 'Files — every file in the snapshot (intent, design, code), to read and to note anywhere.',
   dashboard:
-    'Dashboard — every intent-feedback item (IF) in the repository, by status and by the intent slice it questions.',
+    'Dashboard — every intent-feedback item in the repository, by status and by the intent slice it questions.',
   submit:
     'Review & submit — look over every ruling and note from this session, then hand them back to the agent.',
 };
@@ -1004,7 +1004,7 @@ function filePeek(r: Ref | Focus): HTMLElement | null {
   return h('div', { class: 'peek' }, h('div', { class: 'peek-head mono' }, r.path), body);
 }
 
-/** Title, status, and first sentence of a Markdown document (or of one IF block). */
+/** Title, status, and first sentence of a Markdown document (or of one intent-feedback block). */
 function mdSummary(text: string): { title?: string; status?: string; summary?: string } {
   const out: { title?: string; status?: string; summary?: string } = {};
   const h1 = /^#{1,3}\s+(.+)$/m.exec(text);
@@ -1033,8 +1033,8 @@ function clean(t: string): string {
 
 function sfBlock(path: string, sfId: string): string {
   const text = fileText(path) ?? '';
-  const n = sfId.replace(/^(?:IF|SF)-/, '');
-  const at = text.search(new RegExp(`^#{2,3}\\s+(?:IF|SF)-${n}\\b`, 'm'));
+  const n = sfId.replace(/^[IS]F-/, '');
+  const at = text.search(new RegExp(`^#{2,3}\\s+[IS]F-${n}\\b`, 'm'));
   if (at < 0) return '';
   const rest = text.slice(at);
   const next = rest.slice(3).search(/^#{1,3}\s/m);
@@ -1383,7 +1383,7 @@ function homeView(): HTMLElement {
   const asks: [string, string, (i: Item) => boolean][] = [
     [
       'Intent feedback to rule on',
-      'IFs — intent-feedback items: frictions a build found in the intent, each with a proposed revision.',
+      'Frictions a build found in the intent, each with a proposed revision.',
       (i) => isIntentFeedback(i.kind) && i.status !== 'ruled',
     ],
     [
@@ -1556,7 +1556,7 @@ function homeView(): HTMLElement {
           'li',
           {},
           h('strong', {}, 'Follow the identifiers. '),
-          'IF numbers (and older SF numbers), entry numbers like 0031, ADRs, and file paths are links: hover to peek, click to go.',
+          'Intent-feedback ids like IF-005 (and the older SF-005), entry numbers like 0031, ADRs, and file paths are links: hover to peek, click to go.',
         ),
         h(
           'li',
@@ -1881,7 +1881,7 @@ function queueView(): HTMLElement {
 
 /**
  * Progressive disclosure: the summary, the proposal, the analysis, and the
- * ruling are open; an IF's supporting fields start folded. Any fold the
+ * ruling are open; an intent-feedback item's supporting fields start folded. Any fold the
  * reviewer opens or closes stays that way for the session (by section key).
  */
 const FOLDED_BY_DEFAULT = new Set([
@@ -2774,7 +2774,7 @@ function dashboardView(): HTMLElement {
       h(
         'p',
         { class: 'lead' },
-        'Every intent-feedback item (IF) in every design entry, by where it stands and by the intent slice it questions.',
+        'Every intent-feedback item in every design entry, by where it stands and by the intent slice it questions.',
       ),
       ledger.length === 0 ? h('p', { class: 'muted' }, 'The packet carries no ledger.') : null,
       h(

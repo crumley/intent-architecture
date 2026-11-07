@@ -68,9 +68,10 @@ back next iteration, the other waits. An item left without a verdict is simply u
 as it is and is offered again.
 
 **Adjudication is still the merge.** A verdict is a ruling, not the settlement: in the intent
-architecture an IF is settled when the intent change carrying it merges. So accept and amend produce
-a change for review and record the item as ruled-and-awaiting; only the merge settles it. _Why:_ the
-tool must not move the moment of adjudication out of history and into a local file.
+architecture an intent-feedback item is settled when the intent change carrying it merges. So accept
+and amend produce a change for review and record the item as ruled-and-awaiting; only the merge
+settles it. _Why:_ the tool must not move the moment of adjudication out of history and into a local
+file.
 
 ## Notes
 

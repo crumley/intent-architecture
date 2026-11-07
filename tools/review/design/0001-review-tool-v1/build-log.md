@@ -23,8 +23,8 @@ its neighbours. The container is `codeview`.
 ref omits the pathspec instead.
 
 **Measured.** Bundle: 167 KiB, one file, `node:` imports only. A real repository (259 tracked text
-files, 22 intent files, 30 IFs): its packet is about 3.2 MB and is served and rendered without
-delay; the scan takes under a second.
+files, 22 intent files, 30 intent-feedback items): its packet is about 3.2 MB and is served and
+rendered without delay; the scan takes under a second.
 
 **Proven** (the acceptance checks; the pull request carries the runs):
 
@@ -52,8 +52,8 @@ each changed the design (the entry's Scope and Design now say what was built):
   the keys.
 - **The ruling did not read as the call to action**, and its consequences scrolled away. The dock
   now carries the consequences above five coloured rulings with a clear selected state.
-- **The item was busy.** An IF's own fields now start folded; the summary, the proposal, the
-  analysis, and the ruling stay open; fold states persist for the session.
+- **The item was busy.** An intent-feedback item's own fields now start folded; the summary, the
+  proposal, the analysis, and the ruling stay open; fold states persist for the session.
 - **Identifiers were opaque.** "IF-005", "0031", "ADR 0006", and paths are now links with peeks.
 - **More colour.** Six themes — four drawn from the Gyokuro family's base palettes, syntax colours,
   and neon accents — with headings, identifiers, code, diffs, and rulings coloured by the theme, and
@@ -94,10 +94,10 @@ the theme picker.
 
 **The vocabulary changed underneath the build.** The architecture renamed _spec feedback_ to
 **intent feedback**: `intent-feedback.md`, ids `IF-NNN`. Repositories migrate on their own schedule,
-so the tool reads both: either file name, either id spelling, ids normalized to IF while the source
-keeps its own text (quotes and anchors match what is on disk). The item kind is `if`, with `sf`
-accepted as a legacy alias; the linker treats `SF-NNN` as an alias of `IF-NNN`. The schema stays at
-version 1 — it was unreleased.
+so the tool reads both: either file name, either id spelling, ids normalized to `IF-NNN` while the
+source keeps its own text (quotes and anchors match what is on disk). The item kind is `if`, with
+`sf` accepted as a legacy alias; the linker treats `SF-NNN` as an alias of `IF-NNN`. The schema
+stays at version 1 — it was unreleased.
 
 ```sh
 cd tools/review && mise run check          # Biome, tsc, 199 tests (both spellings), bundle drift

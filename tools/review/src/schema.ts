@@ -31,7 +31,7 @@ export const KNOWN_KINDS = [
   'decision',
   'finding',
 ] as const;
-/** Intent feedback (an IF); `sf` is the legacy spelling from before the rename and is accepted. */
+/** Intent feedback; `sf` is the legacy spelling from before the rename and is accepted. */
 export const isIntentFeedback = (kind: string): boolean => kind === 'if' || kind === 'sf';
 
 export const IF_STATUSES: readonly IfStatus[] = ['pending', 'ruled', 'adjudicated', 'declined'];
@@ -80,7 +80,7 @@ export type Item = {
   title: string;
   status?: IfStatus; // required for kind "if" (intent feedback; legacy "sf")
   statusLine?: string;
-  baseStatusLine?: string; // branch mode: the IF's Status at the base, when the branch changed it
+  baseStatusLine?: string; // branch mode: the intent-feedback item's Status at the base, when the branch changed it
   attention?: Attention; // branch mode: needs the human's judgment, or routine
   source: SourceRef;
   changes?: FileChange[];

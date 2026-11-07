@@ -29,7 +29,7 @@ const IN_0031 = {
 
 // Each row: text, context -> [linked text, link] pairs.
 const CASES: [string, object, [string, string][]][] = [
-  // IF is the id; SF, the spelling before the rename, is an alias that links to the same IF.
+  // IF-NNN is the id; SF-NNN, the spelling before the rename, is an alias for the same item.
   ['see IF-005', IN_0031, [['IF-005', 'if:0031-detached-session-hosting/IF-005']]],
   ['as 0051 IF-001 says', IN_0031, [['0051 IF-001', 'if:0051-floor-scope-sessions/IF-001']]],
   ['see SF-005', IN_0031, [['SF-005', 'if:0031-detached-session-hosting/IF-005']]],

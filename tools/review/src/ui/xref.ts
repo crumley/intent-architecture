@@ -15,7 +15,7 @@ export type RefIndex = {
   sfs: Set<string>;
   /** basename -> paths, for `file.md` mentions without a directory */
   basenames: Map<string, string[]>;
-  /** the items under review: an unqualified IF id with no entry context resolves if unique here */
+  /** the items under review: an unqualified intent-feedback id with no entry context resolves if unique here */
   preferred: string[];
 };
 
@@ -66,7 +66,7 @@ export function resolvePath(idx: RefIndex, ctx: RefContext, raw: string): string
 /**
  * Link ranges (absolute offsets) for `text`. Link strings: `if:<entry>/IF-NNN`,
  * `entry:<NNNN>`, `adr:<NNNN>`, `file:<path>`. Overlaps keep the first found,
- * in the order Markdown links, IF ids, ADRs, paths, entry numbers.
+ * in the order Markdown links, intent-feedback ids, ADRs, paths, entry numbers.
  */
 export function findRefs(text: string, idx: RefIndex, ctx: RefContext = {}): Range[] {
   const out: Range[] = [];
@@ -85,11 +85,9 @@ export function findRefs(text: string, idx: RefIndex, ctx: RefContext = {}): Ran
     if (path) add(at + 1, textEnd, `file:${path}`);
     taken.push([textEnd, at + m[0].length]);
   }
-  // IF ids — and SF ids, their legacy spelling, as an alias — optionally qualified by their
+  // intent-feedback ids — and SF ids, their legacy spelling, as an alias — optionally qualified by their
   // entry: "0051 IF-001", "0031/IF-005", "IF-002", "SF-002".
-  for (const m of text.matchAll(
-    /\b(?:(\d{4})(?:-[a-z0-9-]+)?(?:['’]s)?[ /])?(?:IF|SF)-(\d{3})\b/g,
-  )) {
+  for (const m of text.matchAll(/\b(?:(\d{4})(?:-[a-z0-9-]+)?(?:['’]s)?[ /])?[IS]F-(\d{3})\b/g)) {
     const num = m[1];
     const sf = `IF-${m[2]}`;
     let entryDir = num ? idx.entries.get(num)?.replace(/^design\//, '') : ctx.entry;

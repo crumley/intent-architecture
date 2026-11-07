@@ -562,9 +562,9 @@ function formatErrors(errors) {
 
 // src/scan.ts
 var MAX_FILE_BYTES = 1024 * 1024;
-var SF_HEADING = /^#{2,3}\s+((?:IF|SF)-\d+)\s*(?:[—–:-]+\s*(.*))?$/;
+var SF_HEADING = /^#{2,3}\s+([IS]F-\d+)\s*(?:[—–:-]+\s*(.*))?$/;
 var FEEDBACK_FILE = /^design\/(\d{4}-[^/]+)\/(?:intent|spec)-feedback\.md$/;
-var normalizeIf = (id) => id.replace(/^SF-/, "IF-");
+var normalizeIf = (id) => id.replace(/^S(?=F-)/, "I");
 var BULLET = /^- \*\*([^*]+?):\*\*\s?(.*)$/;
 var LINK = /\]\(([^)\s]+)\)/g;
 var OPEN_QUESTIONS = "intent/00-foundation/open-questions.md";
@@ -1851,7 +1851,7 @@ function cmdScan(flags, io) {
     for (const i of packet.items)
       count.set(i.kind, (count.get(i.kind) ?? 0) + 1);
     const kinds = [...count.entries()].map(([k, n]) => `${n} ${k}`).join(", ") || "no items";
-    io.out(`review: wrote ${out} — ${packet.mode} mode: ${kinds}; ` + `${packet.ledger?.length ?? 0} IFs in the ledger, ${packet.files.length} files`);
+    io.out(`review: wrote ${out} — ${packet.mode} mode: ${kinds}; ` + `${packet.ledger?.length ?? 0} intent-feedback items in the ledger, ${packet.files.length} files`);
   } else {
     io.out(json.trimEnd());
   }
@@ -5064,7 +5064,7 @@ td.st-adjudicated {
         add(at + 1, textEnd, \`file:\${path}\`);
       taken.push([textEnd, at + m[0].length]);
     }
-    for (const m of text.matchAll(/\\b(?:(\\d{4})(?:-[a-z0-9-]+)?(?:['’]s)?[ /])?(?:IF|SF)-(\\d{3})\\b/g)) {
+    for (const m of text.matchAll(/\\b(?:(\\d{4})(?:-[a-z0-9-]+)?(?:['’]s)?[ /])?[IS]F-(\\d{3})\\b/g)) {
       const num = m[1];
       const sf = \`IF-\${m[2]}\`;
       let entryDir = num ? idx.entries.get(num)?.replace(/^design\\//, "") : ctx.entry;
@@ -5208,7 +5208,7 @@ td.st-adjudicated {
     return v;
   }
   function shortId(id) {
-    const m = /^(\\d{4})-[^/]*\\/(?:IF|SF)-(\\d+)$/.exec(id);
+    const m = /^(\\d{4})-[^/]*\\/[IS]F-(\\d+)$/.exec(id);
     if (m)
       return \`\${m[1]} IF-\${m[2]}\`;
     const adr = /(?:^|\\/)decisions\\/(\\d{4})-/.exec(id);
@@ -5636,7 +5636,7 @@ td.st-adjudicated {
     home: "Home — what this review is, what you are asked to do, how to work through it, and the keys.",
     queue: "Queue — the items needing your ruling, one at a time, with the intent they touch beside them.",
     files: "Files — every file in the snapshot (intent, design, code), to read and to note anywhere.",
-    dashboard: "Dashboard — every intent-feedback item (IF) in the repository, by status and by the intent slice it questions.",
+    dashboard: "Dashboard — every intent-feedback item in the repository, by status and by the intent slice it questions.",
     submit: "Review & submit — look over every ruling and note from this session, then hand them back to the agent."
   };
   var editor = null;
@@ -5887,8 +5887,8 @@ td.st-adjudicated {
   }
   function sfBlock(path, sfId) {
     const text = fileText(path) ?? "";
-    const n = sfId.replace(/^(?:IF|SF)-/, "");
-    const at = text.search(new RegExp(\`^#{2,3}\\\\s+(?:IF|SF)-\${n}\\\\b\`, "m"));
+    const n = sfId.replace(/^[IS]F-/, "");
+    const at = text.search(new RegExp(\`^#{2,3}\\\\s+[IS]F-\${n}\\\\b\`, "m"));
     if (at < 0)
       return "";
     const rest = text.slice(at);
@@ -6101,7 +6101,7 @@ td.st-adjudicated {
     const asks = [
       [
         "Intent feedback to rule on",
-        "IFs — intent-feedback items: frictions a build found in the intent, each with a proposed revision.",
+        "Frictions a build found in the intent, each with a proposed revision.",
         (i) => isIntentFeedback(i.kind) && i.status !== "ruled"
       ],
       [
@@ -6146,7 +6146,7 @@ td.st-adjudicated {
     }), p.mode === "branch" ? h("button", { class: "ask", onclick: () => go("submit") }, h("span", { class: "ask-n" }, "1"), h("span", { class: "ask-body" }, h("strong", {}, "Overall verdict"), h("span", { class: "muted small" }, "Approve, request changes, or comment — given on Review & submit.")), h("span", { class: "ask-done small muted" }, S.review.overall ? S.review.overall.verdict : "")) : null), h("div", { class: "row cta" }, h("button", {
       class: "btn primary big",
       onclick: () => next !== undefined ? select(next) : go("submit")
-    }, ruled === 0 ? "Start reviewing →" : next !== undefined ? "Continue reviewing →" : "Review & submit →"), h("span", { class: "muted small" }, \`\${ruled} of \${its.length} ruled · \${S.review.annotations.length} notes · your work saves as you go\`)), h("h2", {}, "How to go through it"), h("ol", { class: "steps" }, h("li", {}, h("strong", {}, "Work the queue. "), "Each item opens with the agent’s recommendation and summary, then the proposed change. Supporting detail — the friction, the assumption, the slice — is folded away until you want it. The intent the item touches is shown beside it."), h("li", {}, h("strong", {}, "Rule at the foot of the item. "), "The consequences of each choice sit above the five rulings. Hover any ruling to see exactly what it asks of the agent."), h("li", {}, h("strong", {}, "Note anything, anywhere. "), "Select text — in an item, in the intent, in code — and a small toolbar offers five kinds of note."), h("li", {}, h("strong", {}, "Follow the identifiers. "), "IF numbers (and older SF numbers), entry numbers like 0031, ADRs, and file paths are links: hover to peek, click to go."), h("li", {}, h("strong", {}, "Hand it back. "), "On Review & submit, check the list and submit. The agent carries everything out and may come back with a smaller packet.")), h("h2", {}, "The views"), h("div", { class: "cards3" }, TABS.filter(([v]) => v !== "home").map(([v, label, key]) => h("button", { class: "card view-card", onclick: () => go(v) }, h("div", { class: "row" }, h("strong", {}, label), h("kbd", {}, key)), h("p", { class: "small muted" }, VIEW_TIP[v].replace(/^[^—]+— /, ""))))), h("h2", {}, "Your rulings"), h("dl", { class: "defs" }, VERDICT_KEYS.map(([k, key]) => [
+    }, ruled === 0 ? "Start reviewing →" : next !== undefined ? "Continue reviewing →" : "Review & submit →"), h("span", { class: "muted small" }, \`\${ruled} of \${its.length} ruled · \${S.review.annotations.length} notes · your work saves as you go\`)), h("h2", {}, "How to go through it"), h("ol", { class: "steps" }, h("li", {}, h("strong", {}, "Work the queue. "), "Each item opens with the agent’s recommendation and summary, then the proposed change. Supporting detail — the friction, the assumption, the slice — is folded away until you want it. The intent the item touches is shown beside it."), h("li", {}, h("strong", {}, "Rule at the foot of the item. "), "The consequences of each choice sit above the five rulings. Hover any ruling to see exactly what it asks of the agent."), h("li", {}, h("strong", {}, "Note anything, anywhere. "), "Select text — in an item, in the intent, in code — and a small toolbar offers five kinds of note."), h("li", {}, h("strong", {}, "Follow the identifiers. "), "Intent-feedback ids like IF-005 (and the older SF-005), entry numbers like 0031, ADRs, and file paths are links: hover to peek, click to go."), h("li", {}, h("strong", {}, "Hand it back. "), "On Review & submit, check the list and submit. The agent carries everything out and may come back with a smaller packet.")), h("h2", {}, "The views"), h("div", { class: "cards3" }, TABS.filter(([v]) => v !== "home").map(([v, label, key]) => h("button", { class: "card view-card", onclick: () => go(v) }, h("div", { class: "row" }, h("strong", {}, label), h("kbd", {}, key)), h("p", { class: "small muted" }, VIEW_TIP[v].replace(/^[^—]+— /, ""))))), h("h2", {}, "Your rulings"), h("dl", { class: "defs" }, VERDICT_KEYS.map(([k, key]) => [
       h("dt", {}, h("span", { class: \`vchip v-\${k}\` }, k), h("kbd", {}, key)),
       h("dd", {}, VERDICT_TIP[k].replace(/^[^—]+— /, ""))
     ])), h("h2", {}, "Kinds of note"), h("dl", { class: "defs" }, ANN_KEYS.map(([k, key, label]) => [
@@ -6615,7 +6615,7 @@ td.st-adjudicated {
       return h("td", { class: \`num st-\${s}\` }, h("span", { title: rs.map((r) => \`\${shortId(r.id)} — \${r.title}\`).join(\`
 \`) }, String(rs.length)));
     })))));
-    return h("main", { class: "page", "data-scroll": "dash" }, h("div", { class: "page-inner" }, h("h1", {}, "Intent feedback across the repository"), h("p", { class: "lead" }, "Every intent-feedback item (IF) in every design entry, by where it stands and by the intent slice it questions."), ledger.length === 0 ? h("p", { class: "muted" }, "The packet carries no ledger.") : null, h("div", { class: "cards" }, STATUSES.map((s) => h("div", { class: \`stat st-\${s}\` }, h("div", { class: "n" }, String(by(s).length)), h("div", { class: "l" }, s)))), ledger.length ? [h("h2", {}, "By intent slice"), matrix, h("h2", {}, "By status")] : null, STATUSES.filter((s) => by(s).length).map((s) => collapsible(\`\${capitalize(s)} · \${by(s).length}\`, h("table", { class: "list" }, h("tbody", {}, by(s).map((r) => h("tr", {}, h("td", { class: "nowrap" }, idCell(r)), h("td", {}, linked(r.title, { entry: r.entry, dir: \`design/\${r.entry}\` })), h("td", { class: "mono small muted" }, r.slices.map((x) => x.replace(/^intent\\//, "")).join(", ")))))), s === "pending" || s === "ruled"))));
+    return h("main", { class: "page", "data-scroll": "dash" }, h("div", { class: "page-inner" }, h("h1", {}, "Intent feedback across the repository"), h("p", { class: "lead" }, "Every intent-feedback item in every design entry, by where it stands and by the intent slice it questions."), ledger.length === 0 ? h("p", { class: "muted" }, "The packet carries no ledger.") : null, h("div", { class: "cards" }, STATUSES.map((s) => h("div", { class: \`stat st-\${s}\` }, h("div", { class: "n" }, String(by(s).length)), h("div", { class: "l" }, s)))), ledger.length ? [h("h2", {}, "By intent slice"), matrix, h("h2", {}, "By status")] : null, STATUSES.filter((s) => by(s).length).map((s) => collapsible(\`\${capitalize(s)} · \${by(s).length}\`, h("table", { class: "list" }, h("tbody", {}, by(s).map((r) => h("tr", {}, h("td", { class: "nowrap" }, idCell(r)), h("td", {}, linked(r.title, { entry: r.entry, dir: \`design/\${r.entry}\` })), h("td", { class: "mono small muted" }, r.slices.map((x) => x.replace(/^intent\\//, "")).join(", ")))))), s === "pending" || s === "ruled"))));
   }
   var OVERALL_COPY = {
     approve: ["Approve", "Ready to merge as far as intent and design go."],

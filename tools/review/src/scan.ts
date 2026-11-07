@@ -5,9 +5,9 @@
 //
 // Two modes (design 0001, "Two modes"):
 //   main   — the repository as it stands (working tree, or a git ref): every open
-//            intent-feedback item (IF) and every cross-cutting open question.
+//            intent-feedback item and every cross-cutting open question.
 //   branch — a branch against its base (base...head): every changed intent file,
-//            every IF the branch raises or re-statuses, every changed decision and
+//            every intent-feedback item the branch raises or re-statuses, every changed decision and
 //            design entry, each carrying its diff.
 
 import { execFileSync } from 'node:child_process';
@@ -44,10 +44,10 @@ export const MAX_FILE_BYTES = 1024 * 1024;
 export type ScanResult = { packet: Packet; warnings: string[] };
 
 // Intent feedback: `intent-feedback.md` with `IF-NNN`, or the legacy `spec-feedback.md` with
-// `SF-NNN` (the vocabulary before the rename). Ids are normalized to IF; source text keeps its spelling.
-const SF_HEADING = /^#{2,3}\s+((?:IF|SF)-\d+)\s*(?:[—–:-]+\s*(.*))?$/;
+// `SF-NNN` (the vocabulary before the rename). Ids are normalized to `IF-NNN`; source text keeps its spelling.
+const SF_HEADING = /^#{2,3}\s+([IS]F-\d+)\s*(?:[—–:-]+\s*(.*))?$/;
 const FEEDBACK_FILE = /^design\/(\d{4}-[^/]+)\/(?:intent|spec)-feedback\.md$/;
-const normalizeIf = (id: string) => id.replace(/^SF-/, 'IF-');
+const normalizeIf = (id: string) => id.replace(/^S(?=F-)/, 'I'); // SF-NNN -> IF-NNN
 const BULLET = /^- \*\*([^*]+?):\*\*\s?(.*)$/;
 const LINK = /\]\(([^)\s]+)\)/g;
 const OPEN_QUESTIONS = 'intent/00-foundation/open-questions.md';
@@ -472,7 +472,7 @@ function slicePassages(text: string, sfPath: string, intent: Map<string, string>
 }
 
 /**
- * The exact source text matching a quote cited in an IF, if one can be found:
+ * The exact source text matching a quote cited in an intent-feedback item, if one can be found:
  * the whole quote or, for an elided quote ("a … b"), its longest fragment —
  * matched across line wrapping, returned as the file's own text.
  */
@@ -486,7 +486,7 @@ export function findQuote(file: string, quotes: string[]): string | undefined {
         .map((w) => w.replace(/[*_`]/g, ''))
         .filter(Boolean);
       if (words.length < 3) continue;
-      // Emphasis markers may sit on either side of any word, in the IF or the file.
+      // Emphasis markers may sit on either side of any word, in the intent-feedback item or the file.
       const esc = words.map((w) => `[*_\`]*${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[*_\`]*`);
       const m = new RegExp(esc.join('\\s+'), 'i').exec(file);
       if (m && (!best || m[0].length > best.length)) best = m[0];
