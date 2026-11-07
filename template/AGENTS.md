@@ -48,9 +48,9 @@ The repo stands on four parallel trees; **`intent` governs the other three** (se
   a standalone document in a single authorial voice — it argues from the system, never from who
   asked. A later entry supersedes (never overwrites) the one it replaces. The build authors
   `design/`, `src/`, `test/`; it does **not** silently rewrite `intent/` — friction goes to the
-  entry's `intent-feedback.md` for human review. An accepted IF (intent-feedback item) rides its
-  **own small intent-edit PR**, never a build PR — the human's merge is the adjudication — while the
-  build proceeds on the IF's stated assumption.
+  entry's `intent-feedback.md` for human review. An accepted intent-feedback item rides its **own
+  small intent-edit PR**, never a build PR — the human's merge is the adjudication — while the build
+  proceeds on the item's stated assumption.
 
 ## Conventions
 

@@ -127,16 +127,16 @@ See `references/structure.md` for the full layout reference and the file-section
 **A design entry is self-contained** — a directory of up to three files, split by who reads them and
 when. `README.md` follows one **common format** — _Status · Context · Serves intent · Scope ·
 Design_ — and is essentially frozen once accepted; `intent-feedback.md` holds the **intent
-feedback** — the build pushing back on the intent, each item an **IF** (`IF-NNN`) — read on its own
-at adjudication time and created only when the build raises an IF (no frictions, no file); an
-optional `build-log.md` holds the journal, only when the build spans sessions or forces a discovery
-worth keeping. Together they hold both the _how_ and the record of producing it (what used to be
-split into a separate "plan"). **Stack/tooling ADRs** live once, in **`design/decisions/`**, and
-entries link them. An entry is a **standalone document with a single authorial voice**: it argues
-its motivation from the system — intent slices, prior entries, observed failures — never from who
-asked for it (no owner, brief, directive, agent, or session appears in it, and it quotes no one),
-and **each fact has one home** inside it — the summary previews, Scope bounds, Design explains;
-other sections link, never restate.
+feedback** — the build pushing back on the intent, each intent-feedback item cited by its id
+(`IF-NNN`) — read on its own at adjudication time and created only when the build raises an
+intent-feedback item (no frictions, no file); an optional `build-log.md` holds the journal, only
+when the build spans sessions or forces a discovery worth keeping. Together they hold both the _how_
+and the record of producing it (what used to be split into a separate "plan"). **Stack/tooling
+ADRs** live once, in **`design/decisions/`**, and entries link them. An entry is a **standalone
+document with a single authorial voice**: it argues its motivation from the system — intent slices,
+prior entries, observed failures — never from who asked for it (no owner, brief, directive, agent,
+or session appears in it, and it quotes no one), and **each fact has one home** inside it — the
+summary previews, Scope bounds, Design explains; other sections link, never restate.
 
 **`design/` is a record, not a mirror.** Entries are filed in the order made and **superseded by
 appending, not overwriting** — when work is re-done later, the new entry marks what it replaces and
@@ -157,47 +157,48 @@ are **optional** — add them when they fit; omit them for an intent-only repo.
   back into `intent/`, a design entry carries not just the _how_ but the **act of building** it: its
   **Scope** (boundary + deferrals in prose + acceptance as numbered executable checks, whose run the
   delivering PR carries — no "works" claim without the exact command), its **`intent-feedback.md`**
-  (intent frictions found while building — the file exists only when there is at least one IF), and
-  an optional **`build-log.md`** (only when the build spans sessions or forces a discovery worth
-  keeping — what building forced or revealed, never a changelog of what the commits already show).
-  Stack/tooling choices are **ADRs in `design/decisions/`**. The load-bearing discipline: **the
-  build does not silently rewrite `intent/`** — a friction is recorded in the entry's
-  `intent-feedback.md` with a **stable identifier** (`IF-001`, …, so a human can cite it precisely)
-  and a concrete proposed revision, and the build proceeds on a stated assumption, leaving the
-  intent change for human review. Adjudication has a shape of its own: each accepted change is its
-  **own small intent-edit PR**, never bundled into a build PR (kept separate it stays reviewable and
-  atomic, and a build PR cannot smuggle intent edits past review); the human's **merge is the
-  adjudication act** — auditable in history, not in chat — while the build proceeds meanwhile on the
-  IF's stated assumption. Once settled, the IF gets a **disposition** appended (never rewriting its
-  text): `adjudicated — <link to the intent change>` or `declined — <one-line why>`; until then it
-  is `pending` — and because the disposition lives in the entry, the open queue is a grep over
-  `design/*/` rather than a list anyone maintains by hand. Because entries are numbered and kept,
-  the _progression_ shows: the diff in `intent/` across entries is the visible payoff. (An
-  intent-only repo's entries are just the _how_; a built repo's also carry Scope, and — when earned
-  — `intent-feedback.md` and the build log.) Templates: `design-entry`,
-  `design-entry-intent-feedback`, `design-decision`. Intent feedback was once called spec feedback
-  (`spec-feedback.md`, `SF-NNN`): read the legacy spelling as the same thing, write only the new
-  one, and migrate a repo still on it per _Migrating a repo from spec feedback_ in
+  (intent frictions found while building — the file exists only when there is at least one
+  intent-feedback item), and an optional **`build-log.md`** (only when the build spans sessions or
+  forces a discovery worth keeping — what building forced or revealed, never a changelog of what the
+  commits already show). Stack/tooling choices are **ADRs in `design/decisions/`**. The load-bearing
+  discipline: **the build does not silently rewrite `intent/`** — a friction is recorded in the
+  entry's `intent-feedback.md` with a **stable identifier** (`IF-001`, …, so a human can cite it
+  precisely) and a concrete proposed revision, and the build proceeds on a stated assumption,
+  leaving the intent change for human review. Adjudication has a shape of its own: each accepted
+  change is its **own small intent-edit PR**, never bundled into a build PR (kept separate it stays
+  reviewable and atomic, and a build PR cannot smuggle intent edits past review); the human's
+  **merge is the adjudication act** — auditable in history, not in chat — while the build proceeds
+  meanwhile on the item's stated assumption. Once settled, the item gets a **disposition** appended
+  (never rewriting its text): `adjudicated — <link to the intent change>` or
+  `declined — <one-line why>`; until then it is `pending` — and because the disposition lives in the
+  entry, the open queue is a grep over `design/*/` rather than a list anyone maintains by hand.
+  Because entries are numbered and kept, the _progression_ shows: the diff in `intent/` across
+  entries is the visible payoff. (An intent-only repo's entries are just the _how_; a built repo's
+  also carry Scope, and — when earned — `intent-feedback.md` and the build log.) Templates:
+  `design-entry`, `design-entry-intent-feedback`, `design-decision`. Intent feedback was once called
+  spec feedback (`spec-feedback.md`, `SF-NNN`): read the legacy spelling as the same thing, write
+  only the new one, and migrate a repo still on it per _Migrating a repo from spec feedback_ in
   `references/structure.md` §6.
 - **The delivery shape for agent-built entries.** When entries are built by agents and gated by a
-  human: **entry ↔ branch ↔ PR, one to one**, the PR body distilling the entry (scope, evidence, IFs
-  raised) with links back to it, and the entry's Status reading `built — awaiting review` while the
-  PR awaits the human; the **entry stays standalone** — the commission (who asked, in what words) is
-  delivery metadata that may inform the PR body but is never restated or attributed in the entry,
-  since adjudication rules against `intent/`, not against anyone's phrasing; the orchestrating agent
-  **verifies the build independently** (its own gate run, its own smoke test, a read of the entry)
-  before the PR opens; gated acts (merge, close) stay with the human. Concurrent entries add a
-  protocol, because two PRs each green alone can make the main line red when both merge —
-  **file-disjoint is not meaning-disjoint**: each PR's body names its shared surfaces; the second of
-  any concurrently built pair merges only after a rebase and a combined gate; the main line's gate
-  is verified after any merge of concurrent work; and entry numbers are **reserved at commission
-  time** so parallel builds don't collide on "next in sequence" (a collision or renumbering, when
-  one actually happens, is one line in the entry's context — never a journal iteration — and a
-  reserved number that never lands stays an honest gap). Finally, **delivered means reachable**: a
-  forge reporting "merged" is not proof the work reached the main line (a stacked PR can merge into
-  a stale base and strand the work) — before an entry's Status moves to accepted, verify the merge
-  commit is an ancestor of the main line (`git merge-base --is-ancestor <merge-commit> <main>`), and
-  retarget stacked PRs to the main line before merging. Full detail: `references/structure.md`.
+  human: **entry ↔ branch ↔ PR, one to one**, the PR body distilling the entry (scope, evidence,
+  intent-feedback items raised) with links back to it, and the entry's Status reading
+  `built — awaiting review` while the PR awaits the human; the **entry stays standalone** — the
+  commission (who asked, in what words) is delivery metadata that may inform the PR body but is
+  never restated or attributed in the entry, since adjudication rules against `intent/`, not against
+  anyone's phrasing; the orchestrating agent **verifies the build independently** (its own gate run,
+  its own smoke test, a read of the entry) before the PR opens; gated acts (merge, close) stay with
+  the human. Concurrent entries add a protocol, because two PRs each green alone can make the main
+  line red when both merge — **file-disjoint is not meaning-disjoint**: each PR's body names its
+  shared surfaces; the second of any concurrently built pair merges only after a rebase and a
+  combined gate; the main line's gate is verified after any merge of concurrent work; and entry
+  numbers are **reserved at commission time** so parallel builds don't collide on "next in sequence"
+  (a collision or renumbering, when one actually happens, is one line in the entry's context — never
+  a journal iteration — and a reserved number that never lands stays an honest gap). Finally,
+  **delivered means reachable**: a forge reporting "merged" is not proof the work reached the main
+  line (a stacked PR can merge into a stale base and strand the work) — before an entry's Status
+  moves to accepted, verify the merge commit is an ancestor of the main line
+  (`git merge-base --is-ancestor <merge-commit> <main>`), and retarget stacked PRs to the main line
+  before merging. Full detail: `references/structure.md`.
 - **`CONTRIBUTING.md` — how we build here.** The engineering qualities every contribution honors —
   **opinionated, automated formatting/linting on every artifact** (push checks into tooling so a
   contributor, human or agent, gets fast automated feedback), **a fast write→fail→fix test loop**,
