@@ -40,17 +40,24 @@ honor these; they do not restate them.
    goal is better intent; the next problem, or the intent that lives only in code, is usually two
    paragraphs or one package away from the item that brought the reviewer there.
 9. **Readable first, then fast.** The page must never feel like a wall of text: summary before
-   detail, prose at a readable measure, the passage in question visible beside the item without
-   navigating away, code and diffs highlighted, and every routine act (next item, rule, annotate,
-   submit) on a key, in light or dark. _Why:_ the tool earns its place only if judging through it is
-   faster and less tiring than judging in an editor; a review surface people avoid is a backlog that
-   grows.
+   detail, supporting detail folded until wanted, prose at a readable measure, the passage in
+   question visible beside the item without navigating away, colour that carries meaning (headings,
+   identifiers, code, diffs, rulings), and every routine act (next item, rule, annotate, submit) on
+   a key. It wears the reader's colours — a choice of themes, and their own. _Why:_ the tool earns
+   its place only if understanding and judging through it is faster and less tiring than in an
+   editor; a surface people avoid is a backlog that grows.
+10. **Everything explains itself and everything links.** Every control says what it does when asked
+    (hover or focus), without being in the way when not; the home page teaches the whole surface;
+    and every identifier a reader meets — an SF number, a design entry, a decision, a file path —
+    resolves to what it names, with a peek before the jump. _Why:_ an intent-architecture repository
+    is a web of numbered, cross-referenced pieces, and a reader who must remember what "SF-005" or
+    "0031" means is a reader doing the tool's job.
 
 ## Canonical home for
 
 - The never-calls-a-model rule; the two-document contract as a principle; the runs-with-nothing-
   installed rule; the local-only rule; the never-lose-work rule; the quote-anchoring rule; the
-  annotate-anything rule; the readable-first rule.
+  annotate-anything rule; the readable-first rule; the explain-and-link rule.
 
 ## Open questions
 

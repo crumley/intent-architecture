@@ -4,10 +4,12 @@
 
 ## Purpose
 
-The review loop is the process the tool exists to serve: a set of things needing the human's
-judgment goes in, rulings and notes come out, the agent carries them out, and whatever is left comes
-back as a smaller set. Each pass is one **iteration**. What goes in is decided by a **producer**
-([`01-producers.md`](01-producers.md)); the loop is the same for all of them.
+The review loop is the activity in the tool that changes the repository (the tool's wider purpose —
+exploring and keeping a repository healthy — is in
+[`../00-foundation/00-vision.md`](../00-foundation/00-vision.md)): a set of things needing the
+human's judgment goes in, rulings and notes come out, the agent carries them out, and whatever is
+left comes back as a smaller set. Each pass is one **iteration**. What goes in is decided by a
+**producer** ([`01-producers.md`](01-producers.md)); the loop is the same for all of them.
 
 ## The loop
 
