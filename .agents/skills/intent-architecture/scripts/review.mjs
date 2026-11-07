@@ -5,8 +5,8 @@
 // src/cli.ts
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync as existsSync2, readFileSync as readFileSync3, writeFileSync as writeFileSync2 } from "node:fs";
-import { join as join3, resolve } from "node:path";
+import { existsSync as existsSync2, mkdirSync, readFileSync as readFileSync3, writeFileSync as writeFileSync2 } from "node:fs";
+import { dirname as dirname2, join as join3, resolve } from "node:path";
 
 // src/anchor.ts
 function lineOf(text, offset) {
@@ -1466,6 +1466,7 @@ async function cmdServe(flags, io) {
     if (!Number.isInteger(port) || port < 0 || port > 65535)
       throw new UsageError("--port must be 0–65535");
   }
+  mkdirSync(dirname2(out), { recursive: true });
   const draft = draftPathFor(out);
   const html = `<!doctype html>
 <html lang="en">

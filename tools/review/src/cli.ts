@@ -7,8 +7,8 @@
 
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { locate } from './anchor.ts';
 import { type ScanOptions, scanRepo } from './scan.ts';
 import {
@@ -218,6 +218,7 @@ async function cmdServe(flags: Flags, io: Io): Promise<number> {
     if (!Number.isInteger(port) || port < 0 || port > 65535)
       throw new UsageError('--port must be 0–65535');
   }
+  mkdirSync(dirname(out), { recursive: true });
   const draft = draftPathFor(out);
   const html = typeof __PAGE_HTML__ === 'string' ? __PAGE_HTML__ : FALLBACK_HTML;
   const handle = await serve(

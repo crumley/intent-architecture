@@ -271,7 +271,7 @@ node <skill>/scripts/review.mjs locate   --decisions <file> --repo <dir> [--pack
   to the human, and waits for the process. The URL takes deep links: `#item=<id>`, `#file=<path>`,
   `#view=files|dashboard|submit`, `#drawer`.
 - The draft is `<out without .json>.draft.json`, loaded on start and saved on every change; submit
-  deletes it, abandon keeps it.
+  deletes it, abandon keeps it. The directory of `--out` is created if it is missing.
 - **Exit codes:** `0` decisions written · `2` usage error or invalid input (each error printed) ·
   `3` review abandoned from the page or the process signalled — no decisions, draft kept · `1`
   anything unexpected. `validate`, `scan`, and `locate` exit `0` or `2`.

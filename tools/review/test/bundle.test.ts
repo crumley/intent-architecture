@@ -112,7 +112,7 @@ type Run = {
 async function serveBundle(p: object): Promise<Run> {
   const dir = tempDir();
   const packetPath = join(dir, 'packet.json');
-  const out = join(dir, 'decisions.json');
+  const out = join(dir, 'not-yet', 'decisions.json'); // serve creates the directory
   writeFileSync(packetPath, JSON.stringify(p));
   const child = spawn('node', [BUNDLE, 'serve', '--packet', packetPath, '--out', out], {
     stdio: ['ignore', 'pipe', 'pipe'],
