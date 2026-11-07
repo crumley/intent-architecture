@@ -17,7 +17,7 @@ triangle, all governed by `intent`.
   - **`README.md`** — the design: summary, context, the intent served, scope, and the _how_.
     Essentially frozen once the entry is accepted; later touches are status changes and supersession
     pointers, not rewrites.
-  - **`spec-feedback.md`** — the intent frictions found while building, with their lifecycle;
+  - **`intent-feedback.md`** — the intent frictions found while building, with their lifecycle;
     created only when the build raises one (no frictions, no file). This file is the adjudication
     surface: it is read on its own, after the build, without the rest of the entry.
   - **`build-log.md`** — **optional**: the journal, created only when the build spans sessions or
@@ -43,7 +43,7 @@ triangle, all governed by `intent`.
   reader on its own terms.
 - **Serves intent** — **Required.** One bullet per intent slice this entry realizes: the link and
   one sentence on how. Link to intent's words rather than quoting them — a quote silently goes stale
-  the moment intent is edited, often by this very entry's spec-feedback. If an entry cannot say
+  the moment intent is edited, often by this very entry's intent feedback. If an entry cannot say
   which intent it realizes, it is not ready to build.
 - **Scope** — what is in (each fact stated here once), what is deferred — each deferral with the
   reason it is acceptable, in prose ("safe to defer because …"): what was weighed, and why nothing
@@ -54,13 +54,15 @@ triangle, all governed by `intent`.
   attractive, the reason it lost, and the cost of the choice made), the module **boundaries**
   established and why (not a file inventory — the commits carry that), the key mechanisms.
 
-**`spec-feedback.md`** — intent frictions found while building, each with a stable id (`SF-NNN`),
-the slice it touches, the assumption made to keep moving, and a proposed revision. The file is
-created only when the build raises an SF: an entry without one is normal, and the absence is the
+**`intent-feedback.md`** — the **intent feedback**: frictions found while building, where the build
+pushes back on the intent. Each intent-feedback item has a stable id (`IF-NNN`), the slice it
+touches, the assumption made to keep moving, and a proposed revision. The file is created only when
+the build raises an intent-feedback item: an entry without one is normal, and the absence is the
 record that building found no friction — a file saying "none" is tokens every later reader pays for
-nothing. An SF is `pending` until settled; once settled, its disposition is **appended** to it —
-`adjudicated` with a link to the intent change that settled it, or `declined` with a one-line why —
-never rewriting the original text, so what building surfaced stays on the record.
+nothing. An intent-feedback item is `pending` until settled; once settled, its disposition is
+**appended** to it — `adjudicated` with a link to the intent change that settled it, or `declined`
+with a one-line why — never rewriting the original text, so what building surfaced stays on the
+record.
 
 **`build-log.md`** (optional) — one block per iteration, newest at the bottom, holding only what the
 commits cannot: what building **forced or revealed** (a failing test that changed the design, a
@@ -81,13 +83,13 @@ pull request that delivers the entry carries their run.
    _why we changed_ is never lost. The same goes for ADRs. A cancelled or abandoned entry keeps its
    number and its record: a gap in the sequence is honest history; renumbering would falsify the
    lineage.
-3. **Spec-feedback, not silent rewrites.** `intent/` governs; building does **not** rewrite it to
+3. **Intent feedback, not silent rewrites.** `intent/` governs; building does **not** rewrite it to
    match the code. When building reveals an intent problem, the entry records it in its
-   `spec-feedback.md` and proceeds on a stated assumption — the spec change is left for human
+   `intent-feedback.md` and proceeds on a stated assumption — the intent change is left for human
    review. Each accepted change is its **own small intent-edit change** (its own branch and PR,
    never bundled into a build PR): kept separate, the adjudication stays reviewable and atomic, and
    a build PR cannot smuggle intent changes past review. The human's **merge is the adjudication
-   act** — auditable in history, not in chat; on merge, the SF gets its disposition appended. (One
+   act** — auditable in history, not in chat; on merge, the item gets its disposition appended. (One
    exception: appending to a slice's own _Open questions_, or noting the build _resolved_ one, is
    allowed and logged.)
 4. **Plural techniques converge through use.** When an entry realizes a mechanism the intent
@@ -102,9 +104,9 @@ pull request that delivers the entry carries their run.
    build this. It argues its motivation from the system — intent slices, prior entries, observed
    failures — never from who asked for it: no owner, brief, directive, agent, or session appears in
    it, and it quotes no one. Whoever or whatever commissioned the work is delivery metadata and
-   lives with the delivery (the branch, the pull request), not in the ledger. The one exception is a
-   spec-feedback **disposition**, which records that a human settled the SF — adjudication is a
-   recorded act, not narrative.
+   lives with the delivery (the branch, the pull request), not in the ledger. The one exception is
+   an intent-feedback **disposition**, which records that a human settled the item — adjudication is
+   a recorded act, not narrative.
 6. **Each fact has one home.** Within an entry, a claim is stated in full exactly once — the summary
    previews, Scope bounds, Design explains — and every other section links or mentions rather than
    restates. (The repo-wide one-home rule, applied inside the entry.)
@@ -115,24 +117,24 @@ and frictions intact, in the order it happened — means the next build starts f
 learned, and the diff in `intent/` between entries is the visible result: the intent, hardened by
 the act of building the system.
 
-## Finding open spec-feedback
+## Finding open intent feedback
 
-The entries are the queue. Every SF's disposition lives in the entry that raised it, which is the
-one authoritative home; to see what is still open, ask the entries:
+The entries are the queue. Every intent-feedback item's disposition lives in the entry that raised
+it, which is the one authoritative home; to see what is still open, ask the entries:
 
 ```sh
 grep -rn -e '\*\*Status:\*\* *`\?pending' -e '`pending`\.' design/*/
 ```
 
 **Why there is no index here.** Earlier revisions of this structure kept a hand-maintained list of
-pending SFs in this README. It is a cache of state the entries already hold, and it drifted in both
-directions in every repo that adopted it — lines left behind after adjudication, SFs raised without
-a line and invisible for weeks. Nothing derived it and nothing checked it, so it quietly stopped
-being true and a reader could not tell. A repo-visible queue is the right goal; a second copy is the
-wrong way to get one. If the grep is too blunt for a large repo, generate the list — never hand-keep
-it.
+pending intent-feedback items in this README. It is a cache of state the entries already hold, and
+it drifted in both directions in every repo that adopted it — lines left behind after adjudication,
+intent-feedback items raised without a line and invisible for weeks. Nothing derived it and nothing
+checked it, so it quietly stopped being true and a reader could not tell. A repo-visible queue is
+the right goal; a second copy is the wrong way to get one. If the grep is too blunt for a large
+repo, generate the list — never hand-keep it.
 
-The two patterns cover the two shapes an SF's status takes (`spec-feedback.md`'s **Status:** line,
-and an inline disposition at the end of an entry's SF bullet). It is a grep, not a parser: a
-`pending` used as ordinary prose can slip in, and the SF heading above each hit is what tells you
-which is which.
+The two patterns cover the two shapes an intent-feedback item's status takes (`intent-feedback.md`'s
+**Status:** line, and an inline disposition at the end of an entry's intent-feedback bullet). It is
+a grep, not a parser: a `pending` used as ordinary prose can slip in, and the `IF-NNN` heading above
+each hit is what tells you which is which.

@@ -14,8 +14,8 @@ The repo stands on four parallel trees; **`intent` governs the other three** (se
   [`01-concepts/`](intent/01-concepts/) (the domain), [`02-subsystems/`](intent/02-subsystems/) (the
   swappable seams, each a contract). Start at [`intent/README.md`](intent/README.md).
 - [`design/`](design/) — the **how**, and the **record of building it**: chronological **design
-  entries** (each: context, scope, the design, and any intent spec-feedback — with a build log only
-  when the build earns one) plus stack ADRs in [`design/decisions/`](design/decisions/). Entries are
+  entries** (each: context, scope, the design, and any intent feedback — with a build log only when
+  the build earns one) plus stack ADRs in [`design/decisions/`](design/decisions/). Entries are
   **superseded, not overwritten**. Organized for building, not a mirror of intent. Start at
   [`design/README.md`](design/README.md).
 - [`src/`](src/) — the code. [`test/`](test/) — the tests.
@@ -48,9 +48,9 @@ The repo stands on four parallel trees; **`intent` governs the other three** (se
   a standalone document in a single authorial voice — it argues from the system, never from who
   asked. A later entry supersedes (never overwrites) the one it replaces. The build authors
   `design/`, `src/`, `test/`; it does **not** silently rewrite `intent/` — friction goes to the
-  entry's `spec-feedback.md` for human review. An accepted spec-feedback rides its **own small
-  intent-edit PR**, never a build PR — the human's merge is the adjudication — while the build
-  proceeds on the SF's stated assumption.
+  entry's `intent-feedback.md` for human review. An accepted intent-feedback item rides its **own
+  small intent-edit PR**, never a build PR — the human's merge is the adjudication — while the build
+  proceeds on the item's stated assumption.
 
 ## Conventions
 

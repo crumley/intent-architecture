@@ -23,12 +23,12 @@
 
 The repo stands on four parallel trees. **`intent` governs the other three.**
 
-| Leg                  | What it is                                                                                                                                                      | Rate of change                                                       |
-| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| [`intent/`](intent/) | The durable **what & why** — purpose, concepts, and constraints.                                                                                                | Changes **only** when our understanding of the system changes. Rare. |
-| [`design/`](design/) | The **how**, and the **record of building it** — chronological design entries (context + scope + design + spec-feedback) and stack ADRs in `design/decisions/`. | Appends as the build proceeds; old entries are kept.                 |
-| [`src/`](src/)       | The code that implements the design.                                                                                                                            | Moves with `design`.                                                 |
-| [`test/`](test/)     | The tests that hold the code to the design and the intent.                                                                                                      | Moves with `design`.                                                 |
+| Leg                  | What it is                                                                                                                                                        | Rate of change                                                       |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| [`intent/`](intent/) | The durable **what & why** — purpose, concepts, and constraints.                                                                                                  | Changes **only** when our understanding of the system changes. Rare. |
+| [`design/`](design/) | The **how**, and the **record of building it** — chronological design entries (context + scope + design + intent feedback) and stack ADRs in `design/decisions/`. | Appends as the build proceeds; old entries are kept.                 |
+| [`src/`](src/)       | The code that implements the design.                                                                                                                              | Moves with `design`.                                                 |
+| [`test/`](test/)     | The tests that hold the code to the design and the intent.                                                                                                        | Moves with `design`.                                                 |
 
 `design` + `src` + `test` are a triangle that moves together; `intent` sits above them. A change
 that has to touch `intent` means we **learned something about the system itself**, not that a tool

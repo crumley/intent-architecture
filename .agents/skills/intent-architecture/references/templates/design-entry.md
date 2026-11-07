@@ -13,17 +13,18 @@ voice: it argues its motivation from the system — intent slices, prior entries
 never from who asked for it, and it quotes no one.>
 
 Copy this directory to `NNNN-<slug>/` (next number in sequence) for each unit of build work. Every
-section stays — write "none this entry" rather than deleting one. Spec-feedback lives beside this
-file in [`spec-feedback.md`](spec-feedback.md) — copied only when the build raises an SF; with none,
-leave it out — and a `build-log.md` is optional (see [`../README.md`](../README.md) for when it
-earns its place). The format and the rules it serves are in [`../README.md`](../README.md).
+section stays — write "none this entry" rather than deleting one. Intent feedback lives beside this
+file in [`intent-feedback.md`](intent-feedback.md) — copied only when the build raises an
+intent-feedback item; with none, leave it out — and a `build-log.md` is optional (see
+[`../README.md`](../README.md) for when it earns its place). The format and the rules it serves are
+in [`../README.md`](../README.md).
 
 ## Serves intent
 
 **Required.** One bullet per intent slice this entry realizes: the relative link and **one
 sentence** on how this entry realizes it. Link to intent's words rather than quoting them — a quote
-silently goes stale the moment intent is edited, often by this very entry's spec-feedback. An entry
-that cannot name the intent it serves is not ready to build.
+silently goes stale the moment intent is edited, often by this very entry's intent feedback. An
+entry that cannot name the intent it serves is not ready to build.
 
 ## Scope
 
