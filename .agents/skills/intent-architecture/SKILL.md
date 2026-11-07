@@ -9,8 +9,10 @@ description: >-
   Markdown check gate), migrate an existing repo into it, extract intent (the durable what & why)
   from existing docs and code, or explain the rules, directory/file structure, file sections,
   AGENTS.md, and per-level READMEs that govern it — including the optional build-record disciplines:
-  the intent-feedback adjudication lifecycle and the delivery shape for agent-built entries.
-  General-purpose: contains no project-specific content.
+  the intent-feedback adjudication lifecycle and the delivery shape for agent-built entries. Also use
+  to review a repository's intent with the human — work through open intent feedback, open questions,
+  and undecided decisions, or a branch's intent and design changes before it merges — in the local
+  review page the skill ships. General-purpose: contains no project-specific content.
 ---
 
 # Intent-governed architecture (the four legs)
@@ -36,7 +38,9 @@ This skill is **general-purpose** — it carries no domain content. You supply t
 the target repository. Ready-to-copy skeletons live in `references/templates/`; the layout reference
 and file-section schemas live in `references/structure.md`; and a complete, ready-to-run repository
 template (the four legs plus a pinned Markdown check gate) lives in the skill's home repository
-under [`template/`](https://github.com/crumley/intent-architecture/tree/main/template).
+under [`template/`](https://github.com/crumley/intent-architecture/tree/main/template). The skill
+also ships a review tool, `scripts/review.mjs`, for the human's side of the loop (see _When asked to
+review intent_, below).
 
 ---
 
@@ -349,6 +353,30 @@ The structure is now the **living contract** for the repo going forward, not a o
 Tell the user the maintenance loop: changes flow `intent → design → src/test`; touching `intent`
 means understanding changed; every idea keeps one home; every choice keeps its _why_. Point them at
 `AGENTS.md` as the entry point.
+
+---
+
+## When asked to review intent
+
+When the human wants to work through what needs their judgment — "review the open spec feedback",
+"review the intent", "what needs my decision", "review this branch's intent changes" — use the
+**review tool** this skill ships: `node <skill-dir>/scripts/review.mjs` (one file, Node 20+, nothing
+to install; `<skill-dir>` is this skill's directory). The loop:
+
+1. **Prepare** a packet: `scan` drafts it from the repository — open items on the main line, or a
+   branch against its base — and you add what only you can write: exact quotes, each proposed
+   revision as an edit, and a fair analysis with a recommendation per item. `validate` it.
+2. **Run** `serve` in the background, give the human the URL it prints, and wait for it to exit. The
+   human rules on each item (accept, amend, decline, defer, revise), annotates any file, and
+   submits.
+3. **Carry out** the decisions: intent edits in their own change, never bundled with design or build
+   work; each SF's Status line updated (ruled-and-awaiting until the intent change merges, then
+   adjudicated; or declined with the human's why); every note acted on; a branch's overall verdict
+   honoured.
+4. **Iterate** with a smaller packet until nothing comes back.
+
+The full procedure — producers, packet fields, the Status wording for every outcome, and what each
+kind of note asks of you — is in `references/review.md`.
 
 ---
 
