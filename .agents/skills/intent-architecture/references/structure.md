@@ -200,6 +200,9 @@ Header line: `Layer: intent · foundation (global). The what & why.`
 ### `intent/00-foundation/open-questions.md`
 
 - Only **cross-cutting** tensions (span multiple slices).
+- A tension that is a **standing watch** — a check to repeat at every boundary, not a question to
+  settle — says so with `_Standing watch._` after its title. It stays listed and read; review
+  tooling leaves it out of the queue, so it is not re-asked every pass.
 - An **index of per-slice open questions** (pointers into each slice's own _Open questions_).
 
 ### `intent/01-concepts/NN-<concept>.md` (template: `templates/intent-concept.md`)
@@ -265,10 +268,10 @@ NNNN-<slug>/ · **Started:** YYYY-MM-DD`.
 **`intent-feedback.md`** — intent frictions (`IF-NNN`: slice, friction, assumption, proposed
 revision). **Created only when the build raises an intent-feedback item** — an entry with no
 frictions has no intent-feedback file, and its absence is the record that none were raised. Written
-to be read on its own at adjudication time, without the README. An intent-feedback item is `pending`
-until settled; once settled, its disposition is appended to it — `adjudicated` with a link to the
-intent change that settled it, or `declined` with a one-line why — never rewriting the original
-text.
+to be read on its own at adjudication time, without the README. An intent-feedback item carries an
+explicit `**Status:** pending` line until settled; once settled, that line records its disposition —
+`adjudicated` with a link to the intent change that settled it, or `declined` with a one-line why —
+never rewriting the original text.
 
 **`build-log.md`** — **optional**: created only when the build spans sessions or when building
 forces a discovery worth keeping (a failing test that changed the design, a measured number, a
@@ -345,14 +348,20 @@ into "if 5", a case-insensitive search for "if" matches nearly every line, and c
 mark it at the start of a sentence.
 
 **The intent-feedback lifecycle.** Raising an intent-feedback item is half the loop; the disposition
-closes it. An intent-feedback item is `pending` from the moment it is raised — the implicit default,
-no line needed. Once settled, a **disposition line is appended** to it, never rewriting the original
-text: `adjudicated — <link to the intent PR/commit/entry that settled it>` or
-`declined — <one-line why>`. **Why:** without a recorded disposition, the open intent-feedback queue
-lives in someone's head or one agent's session memory — exactly the unrecorded state this structure
-exists to eliminate. Because the disposition lives in the entry, the queue is derived, never kept:
-the design README documents a grep over the entries rather than an index of pending intent-feedback
-items (a hand-kept index is a second copy of state the entries already hold, and it drifts):
+closes it. An intent-feedback item is `pending` from the moment it is raised, and **says so**: its
+`**Status:** pending` line is written with it, because the queue is found by grepping for that line
+and an item without one is invisible to the grep (tools that read the entries can only infer it).
+Once settled, the Status line **records the disposition**, never rewriting the item's original text:
+`adjudicated — <link to the intent PR/commit/entry that settled it>` or `declined — <one-line why>`;
+a ruling made but not yet landed reads
+`pending — ruled by <who> <date>, awaiting the intent edit: <the ruling>`. An older entry that
+records intent feedback **inline** in its README ends each bullet with `_Disposition:_ <status> — …`
+instead; the second grep pattern below, and the review tool, read that shape too. **Why:** without a
+recorded disposition, the open intent-feedback queue lives in someone's head or one agent's session
+memory — exactly the unrecorded state this structure exists to eliminate. Because the disposition
+lives in the entry, the queue is derived, never kept: the design README documents a grep over the
+entries rather than an index of pending intent-feedback items (a hand-kept index is a second copy of
+state the entries already hold, and it drifts):
 
 ```sh
 grep -rn -e '\*\*Status:\*\* *`\?pending' -e '`pending`\.' design/*/

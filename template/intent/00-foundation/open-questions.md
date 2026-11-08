@@ -9,8 +9,9 @@ per-concept items move there, not here. This file also indexes those, so nothing
 ## Cross-cutting items
 
 - **<Tension>** — <the question, and which slices it touches>.
-- **<Boundary drift watch>** — <e.g. as `design/` fills in, watch for tool-naming creeping into
-  `intent/`, and durable constraints stranded in `design/`>.
+- **<Boundary drift watch>** _Standing watch._ — <e.g. as `design/` fills in, watch for tool-naming
+  creeping into `intent/`, and durable constraints stranded in `design/`>. (A standing watch is a
+  check to repeat, not a question to settle; the marker keeps review tooling from asking it again.)
 
 ## Index of per-slice open questions
 
