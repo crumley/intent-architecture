@@ -81,6 +81,10 @@ closes too.
     collisions, ranges — is pure and tested; what remains is appearance.
   - **Per-slice open questions in `scan`, and every v1 deferral** — unchanged from
     [0001](../0001-review-tool-v1/README.md).
+  - **The name.** Name: Markup (chosen 2026-11-08). Rename the command, bundle (`review.mjs` →
+    `markup.mjs`), skill text, and page title in one sweep with the move to its own repo (ward task
+    f12t8). The npm name is `@crumley/markup`. Safe to defer because nothing outside this repository
+    depends on the current names yet, and one sweep at the move renames everything once.
 - **Acceptance:**
   1. `mise run check` in `tools/review/` is green: Biome, `tsc`, every test, and the bundle drift
      check; `mise run check` and `mise run template-check` at the root stay green.
