@@ -8,12 +8,12 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import type { AddressInfo } from 'node:net';
 import { basename, dirname, join } from 'node:path';
 import {
+  DECISIONS_VERSION,
   type Decisions,
   DRAFT_KIND,
   type Draft,
   type Packet,
   packetRef,
-  SCHEMA_VERSION,
   toDecisions,
   type ValidationError,
   validateDecisions,
@@ -147,7 +147,7 @@ export async function serve(opts: ServeOptions): Promise<ServeHandle> {
         const draft = {
           ...(body.value as object),
           kind: DRAFT_KIND,
-          version: SCHEMA_VERSION,
+          version: DECISIONS_VERSION,
           packet: ref,
         };
         const v = validateDraft(draft);

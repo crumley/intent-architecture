@@ -19,7 +19,7 @@ export const SLICE_TEXT = `# Seam
 export function packet(over: Partial<Packet> = {}): Packet {
   return {
     kind: 'intent-review-packet',
-    version: 1,
+    version: 2,
     mode: 'main',
     title: 'Fixture review',
     createdAt: '2026-11-07T00:00:00.000Z',
@@ -30,6 +30,7 @@ export function packet(over: Partial<Packet> = {}): Packet {
       {
         id: '0001-x/IF-001',
         kind: 'if',
+        question: 'Should the seam name attach and resume as two acts?',
         title: 'resume conflates attach',
         status: 'pending',
         source: { path: 'design/0001-x/intent-feedback.md', line: 3 },
@@ -38,16 +39,22 @@ export function packet(over: Partial<Packet> = {}): Packet {
           { key: 'friction', label: 'Friction', text: 'Two acts share one verb.' },
           { key: 'revision', label: 'Proposed revision', text: 'Name both acts.' },
         ],
-        proposal: {
+        what: { facts: 'The constraint says "for resume" for a live session.' },
+        soWhat: { stakes: 'A design could build resume-as-attach.' },
+        nowWhat: {
           edits: [{ path: SLICE, before: 'for resume', after: 'to attach when live, or resume' }],
+          ifAccepted: 'Two verbs.',
+          ifDeclined: 'One verb.',
+          recommendation: { verdict: 'accept', why: 'It holds for any host.' },
         },
-        analysis: { recommendation: { verdict: 'accept', why: 'It holds for any host.' } },
       },
       {
         id: '0001-x/IF-002',
         kind: 'if',
+        question: 'Does this wording land the ruling that attach is shared?',
         title: 'attach multiplicity',
         status: 'ruled',
+        ruled: { by: 'Rae', on: '2026-11-06', ruling: 'shared.' },
         statusLine: 'pending — ruled by Rae 2026-11-06, awaiting the intent edit: shared.',
         source: { path: 'design/0001-x/intent-feedback.md', line: 9 },
         evidence: [{ path: SLICE }],
@@ -91,6 +98,7 @@ export function branchPacket(): Packet {
   p.items.push({
     id: `intent-change/${SLICE}`,
     kind: 'intent-change',
+    question: 'Is this change to the seam right?',
     title: `${SLICE} — modified`,
     attention: 'judgment',
     source: { path: SLICE, line: 5 },

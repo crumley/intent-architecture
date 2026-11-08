@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { classifyStatus, findQuote, parseNameStatus, scanRepo } from '../src/scan.ts';
+import { classifyStatus, findQuote, parseNameStatus, parseRuled, scanRepo } from '../src/scan.ts';
 import { type IfStatus, validatePacket } from '../src/schema.ts';
 import { tree } from './fixtures.ts';
 
@@ -18,6 +18,27 @@ const STATUS: [string | undefined, IfStatus][] = [
 
 describe('classifyStatus', () => {
   test.each(STATUS)('%p -> %s', (line, want) => expect(classifyStatus(line)).toBe(want));
+});
+
+describe('parseRuled', () => {
+  test('who, when, where, and the ruling', () => {
+    expect(
+      parseRuled(
+        'pending — ruled by Ryan 2026-11-06 (review of #109), awaiting the intent edit: lineage is the reading.',
+      ),
+    ).toEqual({
+      by: 'Ryan',
+      on: '2026-11-06',
+      where: 'review of #109',
+      ruling: 'lineage is the reading.',
+    });
+  });
+  test('a Status that names no ruling is not a ruled block', () => {
+    expect(
+      parseRuled('pending — ruled by Rae 2026-11-06, awaiting the intent edit:'),
+    ).toBeUndefined();
+    expect(parseRuled('pending.')).toBeUndefined();
+  });
 });
 
 describe('findQuote', () => {
@@ -60,26 +81,120 @@ describe('main mode', () => {
     expect(packet.mode).toBe('main');
   });
 
-  test('items: pending and ruled SFs, then the cross-cutting open questions', () => {
-    expect(packet.items.map((i) => [i.id, i.kind, i.status])).toEqual([
-      ['0001-alpha/IF-001', 'if', 'pending'],
-      ['0001-alpha/IF-002', 'if', 'ruled'],
-      ['0001-alpha/IF-005', 'if', 'pending'],
-      ['0003-modern/IF-001', 'if', 'pending'],
-      ['OQ/who-owns-the-cadence', 'question', 'pending'],
-      ['design/decisions/0002-pending.md', 'decision', undefined],
+  test('items: open intent feedback (files, then inline), then open questions and decisions', () => {
+    expect(packet.items.map((i) => [i.id, i.kind, i.status, i.category])).toEqual([
+      ['0001-alpha/IF-001', 'if', 'pending', undefined],
+      ['0001-alpha/IF-002', 'if', 'ruled', undefined],
+      ['0001-alpha/IF-005', 'if', 'pending', undefined],
+      ['0003-modern/IF-001', 'if', 'pending', undefined],
+      ['0004-inline/IF-002', 'if', 'pending', 'inline'],
+      ['OQ/who-owns-the-cadence', 'question', 'pending', undefined],
+      ['design/decisions/0002-pending.md', 'decision', undefined, undefined],
     ]);
   });
 
-  test('the ledger holds every SF, settled ones included', () => {
-    expect(packet.ledger?.map((r) => [r.id, r.status, r.slices])).toEqual([
-      ['0001-alpha/IF-001', 'pending', ['intent/02-subsystems/00-seam.md']],
-      ['0001-alpha/IF-002', 'ruled', ['intent/02-subsystems/00-seam.md']],
-      ['0001-alpha/IF-003', 'adjudicated', []],
-      ['0001-alpha/IF-004', 'declined', []],
-      ['0001-alpha/IF-005', 'pending', []],
-      ['0003-modern/IF-001', 'pending', ['intent/02-subsystems/00-seam.md']],
+  test('every item carries a drafted question, for the agent to replace', () => {
+    expect(packet.items.map((i) => i.question)).toEqual([
+      'Should the intent change as 0001 IF-001 proposes?',
+      'Should the intent change as 0001 IF-002 proposes?',
+      'Should the intent change as 0001 IF-005 proposes?',
+      'Should the intent change as 0003 IF-001 proposes?',
+      'Should the intent change as 0004 IF-002 proposes?',
+      'How should this open question be settled: Who owns the cadence?',
+      'Should ADR 0002 be accepted as it stands?',
     ]);
+  });
+
+  test('the ledger holds every intent-feedback item, settled and inline included', () => {
+    expect(packet.ledger?.map((r) => [r.id, r.status, r.slices, r.form, r.inferred])).toEqual([
+      [
+        '0001-alpha/IF-001',
+        'pending',
+        ['intent/02-subsystems/00-seam.md'],
+        undefined,
+        'no Status line: pending by default',
+      ],
+      ['0001-alpha/IF-002', 'ruled', ['intent/02-subsystems/00-seam.md'], undefined, undefined],
+      ['0001-alpha/IF-003', 'adjudicated', [], undefined, undefined],
+      ['0001-alpha/IF-004', 'declined', [], undefined, undefined],
+      ['0001-alpha/IF-005', 'pending', [], undefined, 'no Status line: pending by default'],
+      [
+        '0003-modern/IF-001',
+        'pending',
+        ['intent/02-subsystems/00-seam.md'],
+        undefined,
+        'no Status line: pending by default',
+      ],
+      [
+        '0004-inline/IF-001',
+        'adjudicated',
+        ['intent/02-subsystems/00-seam.md'],
+        'inline',
+        undefined,
+      ],
+      [
+        '0004-inline/IF-002',
+        'pending',
+        ['intent/02-subsystems/00-seam.md'],
+        'inline',
+        'no Status or disposition line',
+      ],
+      ['0004-inline/IF-003', 'adjudicated', [], 'inline', undefined],
+      [
+        '0004-inline/IF-004',
+        'adjudicated',
+        [],
+        'inline',
+        'a Resolution paragraph, no disposition line',
+      ],
+    ]);
+  });
+
+  test('an inline item: its labels become sections, its Slice a passage; the disposition is its Status', () => {
+    const it = packet.items.find((i) => i.id === '0004-inline/IF-002');
+    expect(it?.sections.map((s) => [s.key, s.text])).toEqual([
+      [
+        'slice',
+        '[`seam`](../../intent/02-subsystems/00-seam.md), "back to a live session for\nresume".',
+      ],
+      ['friction', 'still open here.'],
+      ['assumption', 'keep going.'],
+      ['revision', 'name both acts.'],
+    ]);
+    expect(it?.title).toBe('still open here');
+    expect(it?.evidence[0]?.quote).toBe('back to a live session for resume');
+    const done = packet.ledger?.find((r) => r.id === '0004-inline/IF-001');
+    expect(done?.statusLine).toBe('adjudicated — [#7](x).');
+    expect(packet.ledger?.find((r) => r.id === '0004-inline/IF-003')?.statusLine).toBe(
+      'adjudicated — applied in this PR as its own commit.',
+    );
+    expect(packet.ledger?.some((r) => r.id === '0004-inline/IF-009')).toBe(false);
+  });
+
+  test('--no-inline keeps inline items in the ledger but out of the queue', () => {
+    const p = scanRepo(root, { inline: false }).packet;
+    expect(p.items.some((i) => i.category === 'inline')).toBe(false);
+    expect(p.ledger?.some((r) => r.form === 'inline')).toBe(true);
+  });
+
+  test('context: where an item is written, and the entry that raised it, when in the snapshot', () => {
+    expect(packet.items[0]?.context).toEqual([
+      {
+        path: 'design/0001-alpha/spec-feedback.md',
+        lines: { start: 5, end: 11 },
+        why: 'Where this intent-feedback item is written, as the build raised it.',
+      },
+      {
+        path: 'design/0001-alpha/README.md',
+        why: 'The design entry that raised it: what was being built.',
+      },
+    ]);
+    const narrow = scanRepo(root, { files: 'intent' }).packet;
+    expect(narrow.items[0]?.context).toBeUndefined();
+  });
+
+  test('a ruled Status yields the ruled block: who, when, and the ruling', () => {
+    expect(packet.items[1]?.ruled).toEqual({ by: 'Rae', on: '2026-11-06', ruling: 'shared.' });
   });
 
   test('an SF’s bullets become sections; the Slice yields a passage with section and quote', () => {
@@ -109,7 +224,11 @@ describe('main mode', () => {
 
   test('an SF without labelled bullets is kept as one body, with a warning', () => {
     expect(packet.items[2]?.sections.map((s) => s.key)).toEqual(['body', 'entry-context']);
-    expect(warnings).toHaveLength(1);
+    expect(warnings).toEqual([
+      expect.stringContaining('IF-005 has no "- **Label:**" bullets'),
+      '4 intent-feedback items are written inline in entry READMEs; 1 carry no settled disposition — group them for the human',
+      '1 open question(s) marked _Standing watch_ left out: Boundary drift watch',
+    ]);
   });
 
   test('the snapshot is every text file (binaries omitted); open questions stop at the index', () => {
@@ -195,7 +314,9 @@ describe('branch mode', () => {
     expect(packet.items[1]?.baseStatusLine).toStartWith('pending — ruled');
     expect(packet.items[1]?.sections[0]).toEqual(expect.objectContaining({ key: 'on-branch' }));
     expect(packet.items[2]?.sections[0]?.text).toBe('Raised on this branch.');
-    expect(packet.items[6]?.context).toEqual([{ path: 'intent/02-subsystems/00-seam.md' }]);
+    expect(packet.items[6]?.context).toEqual([
+      { path: 'intent/02-subsystems/00-seam.md', why: 'Intent this design entry says it serves.' },
+    ]);
     expect(packet.items[6]?.title).toBe('0002 — Beta — added');
   });
 
@@ -221,6 +342,7 @@ const REPO = {
 ## Cross-cutting items
 
 - **Who owns the cadence.** Nothing fires the recurring work.
+- **Boundary drift watch.** _Standing watch._ Keep checking both directions.
 - **<Tension>** — <placeholder, skipped>.
 
 ## Index of per-slice open questions
@@ -273,6 +395,27 @@ Just a paragraph, no labelled bullets.
 
 - **Slice:** [\`seam\`](../../intent/02-subsystems/00-seam.md), _Constraints_.
 - **Friction:** read the same way.
+`,
+  // The older shape: intent feedback written inline in the entry's README.
+  'design/0004-inline/README.md': `# 0004 — Inline
+
+## Intent feedback
+
+- **IF-001** — [\`seam\`](../../intent/02-subsystems/00-seam.md), "Constraints". _Friction:_ the seam
+  is terse. _Proposed revision:_ say more. _Disposition:_ **adjudicated** — [#7](x).
+- **IF-002** — [\`seam\`](../../intent/02-subsystems/00-seam.md), "back to a live session for
+  resume". **Friction:** still open here. **Assumption made:** keep going. **Proposed revision:**
+  name both acts.
+- **IF-003** — seam. _Friction:_ x. _Adjudicated:_ applied in this PR as its own commit.
+- **IF-004** — seam. _Friction:_ y.
+
+  **Resolution (2026-08-09, adopted by the human).** Pinned as the assumption stood.
+
+Near-candidate, not filed: something else.
+
+## Scope
+
+- **IF-009** — not intent feedback: outside the section.
 `,
   'design/decisions/0001-settled.md':
     '# 0001 — Settled choice\n\n> **Status:** accepted · **Date:** 2026-01-01\n',

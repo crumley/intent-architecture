@@ -13,6 +13,7 @@ import { dirname, join, resolve } from 'node:path';
 import { locate } from './anchor.ts';
 import { type ScanOptions, scanRepo } from './scan.ts';
 import {
+  advise,
   formatErrors,
   type Packet,
   type ValidationError,
@@ -32,8 +33,9 @@ export const TOOL_VERSION = '1.0.0';
 const USAGE = `intent review tool ${TOOL_VERSION} — review a repository's intent and open intent feedback
 
 usage:
-  review.mjs scan     --repo <dir> [--out <packet.json>] [--ref <ref>] [--no-questions]
-  review.mjs scan     --repo <dir> --base <ref> [--head <ref>] [--out <packet.json>]
+  review.mjs scan     --repo <dir> [--out <packet.json>] [--ref <ref>] [--files repo|intent]
+                      [--no-questions] [--no-inline]
+  review.mjs scan     --repo <dir> --base <ref> [--head <ref>] [--files repo|intent] [--out <packet.json>]
   review.mjs validate (--packet <file> | --decisions <file>)
   review.mjs serve    --packet <file> --out <decisions.json> [--port <n>] [--open] [--theme <id|file.json>]
   review.mjs locate   --decisions <file> --repo <dir> [--packet <file>]
@@ -56,7 +58,10 @@ class InputError extends Error {
 type Flags = Record<string, string | true>;
 
 const KNOWN: Record<string, { values: string[]; switches: string[] }> = {
-  scan: { values: ['repo', 'out', 'ref', 'base', 'head'], switches: ['no-questions'] },
+  scan: {
+    values: ['repo', 'out', 'ref', 'base', 'head', 'files'],
+    switches: ['no-questions', 'no-inline'],
+  },
   validate: { values: ['packet', 'decisions'], switches: [] },
   serve: { values: ['packet', 'out', 'port', 'theme'], switches: ['open'] },
   locate: { values: ['decisions', 'repo', 'packet'], switches: [] },
@@ -167,7 +172,15 @@ function cmdScan(flags: Flags, io: Io): number {
   if (base === undefined && head !== undefined) throw new UsageError('--head needs --base');
   if (base !== undefined && ref !== undefined)
     throw new UsageError('--ref is for main mode; use --head');
-  const opts: ScanOptions = { questions: flags['no-questions'] !== true };
+  const files = str('files');
+  if (files !== undefined && files !== 'repo' && files !== 'intent') {
+    throw new UsageError('--files is "repo" (every tracked text file, the default) or "intent"');
+  }
+  const opts: ScanOptions = {
+    questions: flags['no-questions'] !== true,
+    inline: flags['no-inline'] !== true,
+  };
+  if (files !== undefined) opts.files = files;
   if (base !== undefined) opts.base = base;
   if (head !== undefined) opts.head = head;
   if (ref !== undefined) opts.ref = ref;
@@ -190,6 +203,9 @@ function cmdScan(flags: Flags, io: Io): number {
       `review: wrote ${out} — ${packet.mode} mode: ${kinds}; ` +
         `${packet.ledger?.length ?? 0} intent-feedback items in the ledger, ${packet.files.length} files`,
     );
+    io.out(
+      "review: next — write each item's question, what, soWhat, and nowWhat (the skill's references/review.md), then validate",
+    );
   } else {
     io.out(json.trimEnd());
   }
@@ -207,6 +223,10 @@ function cmdValidate(flags: Flags, io: Io): number {
     io.out(
       `review: ${p} is a valid packet (${packet.items.length} items, ${packet.files.length} files)`,
     );
+    const advice = advise(packet);
+    for (const a of advice) io.out(`review: advice: ${a.path}: ${a.message}`);
+    if (advice.length)
+      io.out(`review: ${advice.length} pieces of advice — not errors, but worth fixing`);
     return 0;
   }
   const { value } = readJsonFile(d as string);

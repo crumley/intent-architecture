@@ -39,6 +39,9 @@ describe('the shipped bundle', () => {
     [['serve', '--out', 'x.json'], 2, '--packet is required'],
     [['validate', '--packet', 'BAD'], 2, 'is not a valid packet'],
     [['validate', '--packet', 'GOOD'], 0, 'is a valid packet'],
+    [['validate', '--packet', 'GOOD'], 0, 'review: advice: items[1]'],
+    [['validate', '--packet', 'V1'], 2, 'this is a version 1 packet'],
+    [['scan', '--repo', '.', '--files', 'code'], 2, '--files is "repo"'],
     [['scan', '--repo', '/nonexistent'], 2, 'has no intent/'],
     [['scan', '--repo', '.', '--head', 'x'], 2, '--head needs --base'],
     [
@@ -51,9 +54,9 @@ describe('the shipped bundle', () => {
     const dir = tempDir();
     writeFileSync(join(dir, 'good.json'), JSON.stringify(packet()));
     writeFileSync(join(dir, 'bad.json'), JSON.stringify({ ...packet(), version: 9 }));
-    const argv = args.map((a) =>
-      a === 'GOOD' ? join(dir, 'good.json') : a === 'BAD' ? join(dir, 'bad.json') : a,
-    );
+    writeFileSync(join(dir, 'v1.json'), JSON.stringify({ ...packet(), version: 1 }));
+    const files: Record<string, string> = { GOOD: 'good.json', BAD: 'bad.json', V1: 'v1.json' };
+    const argv = args.map((a) => (files[a] ? join(dir, files[a] as string) : a));
     const r = spawnSync('node', [BUNDLE, ...argv], { encoding: 'utf8' });
     expect(r.status).toBe(code);
     expect(r.stdout + r.stderr).toContain(fragment);
