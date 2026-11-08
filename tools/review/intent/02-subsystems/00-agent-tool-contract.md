@@ -62,7 +62,9 @@ long as this contract holds.
 ## Left to implementation
 
 - The concrete schemas, the invocation, the exit codes, and where the draft lives — planned in
-  [`../../design/0001-review-tool-v1/`](../../design/0001-review-tool-v1/README.md).
+  [`../../design/0001-review-tool-v1/`](../../design/0001-review-tool-v1/README.md); the packet's
+  version 2 (the question-first item) in
+  [`../../design/0002-review-format-v2/`](../../design/0002-review-format-v2/README.md).
 
 ## Open questions
 

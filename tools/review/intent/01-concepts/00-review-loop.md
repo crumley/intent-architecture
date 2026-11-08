@@ -13,12 +13,19 @@ left comes back as a smaller set. Each pass is one **iteration**. What goes in i
 
 ## The loop
 
-1. **Prepare.** The agent gathers the items and writes a **packet**: per item, the **evidence** —
-   the intent passages and code locations it is about, quoted with where they live — the item's own
-   text, any proposed change rendered as an edit, and the agent's **analysis**: what accepting and
-   declining each lead to, how the item relates to others, and a recommendation. The packet also
-   carries a snapshot of the repository's files, so the reviewer can read beyond the items. _Why the
-   agent and not the tool:_ the analysis is judgment, and judgment needs an accountable author.
+1. **Prepare.** The agent gathers the items and writes a **packet**. Each item asks the human **one
+   question** and answers it in three stages, read top to bottom: **what** — the facts: the
+   **evidence** (the intent passages and code locations it is about, quoted with where they live),
+   what the work ran into, the assumption made meanwhile, told without advocacy; **so what** — why
+   it matters: what breaks or stays ambiguous if nothing changes, and how the item relates to
+   others; and **now what** — the choices: any proposed change rendered as an edit, what accepting
+   and declining each lead to, and, last and marked as advice, a recommendation. The files a
+   decision would edit are told apart from files shown only for context, each of which says why it
+   is there. The packet also carries a snapshot of the repository's files, so the reviewer can read
+   beyond the items. _Why the agent and not the tool:_ the analysis is judgment, and judgment needs
+   an accountable author. _Why this order:_ a reviewer who meets the recommendation before knowing
+   what is being decided rules on the agent's framing; the question first, the facts before the
+   stakes, and the advice after the choices keeps the ruling the human's.
 2. **Review.** The human works the queue — what needs judgment first, the routine after — reading
    each item beside its evidence, ruling on it, and annotating any passage of any file. _Why the
    whole repository is open:_ the goal is better intent, not an empty queue.
@@ -91,9 +98,10 @@ code and intent that extraction and drift review run on.
 
 ## Canonical home for
 
-- The loop and its iteration; the two modes and the overall verdict on a change; what an item is and
-  that item kinds are open; the five verdicts and what each must lead to; the ruled-is-not-settled
-  rule; what a note is, its five intents, and that every one is acted on.
+- The loop and its iteration; the two modes and the overall verdict on a change; what an item is,
+  its shape (one question; what, so what, now what), and that item kinds are open; the five verdicts
+  and what each must lead to; the ruled-is-not-settled rule; what a note is, its five intents, and
+  that every one is acted on.
 
 ## Left to implementation
 
