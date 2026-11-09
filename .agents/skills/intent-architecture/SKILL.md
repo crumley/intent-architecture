@@ -11,8 +11,8 @@ description: >-
   AGENTS.md, and per-level READMEs that govern it — including the optional build-record disciplines:
   the intent-feedback adjudication lifecycle and the delivery shape for agent-built entries. Also use
   to review a repository's intent with the human — work through open intent feedback, open questions,
-  and undecided decisions, or a branch's intent and design changes before it merges — in the local
-  review page the skill ships. General-purpose: contains no project-specific content.
+  and undecided decisions, or a branch's intent and design changes before it merges — in Markup's
+  local review page (needs the markup skill). General-purpose: contains no project-specific content.
 ---
 
 # Intent-governed architecture (the four legs)
@@ -38,9 +38,9 @@ This skill is **general-purpose** — it carries no domain content. You supply t
 the target repository. Ready-to-copy skeletons live in `references/templates/`; the layout reference
 and file-section schemas live in `references/structure.md`; and a complete, ready-to-run repository
 template (the four legs plus a pinned Markdown check gate) lives in the skill's home repository
-under [`template/`](https://github.com/crumley/intent-architecture/tree/main/template). The skill
-also ships a review tool, `scripts/review.mjs`, for the human's side of the loop (see _When asked to
-review intent_, below).
+under [`template/`](https://github.com/crumley/intent-architecture/tree/main/template). For the
+human's side of the loop, intent review uses the companion
+[markup skill](https://github.com/crumley/markup) (see _When asked to review intent_, below).
 
 ---
 
@@ -359,15 +359,20 @@ means understanding changed; every idea keeps one home; every choice keeps its _
 ## When asked to review intent
 
 When the human wants to work through what needs their judgment — "review the open intent feedback",
-"review the intent", "what needs my decision", "review this branch's intent changes" — use the
-**review tool** this skill ships: `node <skill-dir>/scripts/review.mjs` (one file, Node 20+, nothing
-to install; `<skill-dir>` is this skill's directory). The loop:
+"review the intent", "what needs my decision", "review this branch's intent changes" — run an
+**intent review**: a specialisation of [Markup](https://github.com/crumley/markup), whose local page
+the human marks up and whose intent producer drafts the packet. It **requires the markup skill**
+(`npx skills add crumley/markup`); this skill keeps only the procedure. Its tool is
+`node <markup-skill-dir>/scripts/markup.mjs` (one file, Node 20+, nothing to install), where
+`<markup-skill-dir>` is the installed markup skill's directory — usually beside this skill under the
+same skills root (`"$(dirname <skill-dir>)/markup"`), else `~/.agents/skills/markup`. If it is not
+installed, say so and offer the install command rather than improvising a review. The loop:
 
-1. **Prepare** a packet: `scan` drafts it from the repository — open items on the main line, or a
-   branch against its base — and you add what only you can write: for each item, the one question it
-   asks the human, then **What** (the facts and the exact passages, no advocacy), **So what** (why
-   it matters), and **Now what** (each proposed revision as an edit, what each choice leads to, and
-   your recommendation, last). `validate` it and work through its advice.
+1. **Prepare** a packet: `scan intent` drafts it from the repository — open items on the main line,
+   or a branch against its base — and you add what only you can write: for each item, the one
+   question it asks the human, then **What** (the facts and the exact passages, no advocacy), **So
+   what** (why it matters), and **Now what** (each proposed revision as an edit, what each choice
+   leads to, and your recommendation, last). `validate` it and work through its advice.
 2. **Run** `serve` in the background, give the human the URL it prints, and wait for it to exit. The
    human rules on each item (accept, accept with changes, amend, revise, decline, defer), annotates
    any file or the agent's own text, and submits.
@@ -377,9 +382,9 @@ to install; `<skill-dir>` is this skill's directory). The loop:
    overall verdict honoured.
 4. **Iterate** with a smaller packet until nothing comes back.
 
-The full procedure — producers, how to write each stage, the Status wording for every outcome, and
-what each kind of note asks of you — is in `references/review.md`; every field of the packet and
-decisions is in `references/review-contract.md`.
+The full procedure — finding the markup skill, producers, how to write each stage, the Status
+wording for every outcome, and what each kind of note asks of you — is in `references/review.md`;
+every field of the packet and decisions is in the markup skill's `references/contract.md`.
 
 ---
 
