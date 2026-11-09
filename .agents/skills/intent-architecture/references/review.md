@@ -1,29 +1,57 @@
-# Reviewing intent: the review tool
+# Reviewing intent with Markup
 
-This skill ships a local review page for the human side of the intent architecture: ruling on intent
-feedback, settling open questions and undecided decisions, and judging a branch's change to the
-intent before it merges. The agent prepares a **packet**, the human reviews it in the page, and the
-agent carries out the **decisions** the page writes. The tool never calls a model; the packet and
-the decisions files are the whole contract between agent and tool.
+Intent review is the human side of the intent architecture: ruling on intent feedback, settling open
+questions and undecided decisions, and judging a branch's change to the intent before it merges. It
+is a **specialisation of [Markup](https://github.com/crumley/markup)** — a local page where a human
+marks up what an agent prepared and hands the decisions back. Markup ships the page, the contract,
+and the intent producer (`scan intent`); this file is the intent-architecture procedure that drives
+them: what to put in front of the human and how to carry out their rulings. The agent prepares a
+**packet**, the human reviews it in the page, and the agent carries out the **decisions** the page
+writes. The tool never calls a model; the packet and the decisions files are the whole contract
+between agent and tool.
 
 Use this when asked to "review the open intent feedback", "review the intent", "what needs my
 decision", "review this branch / PR's intent changes", or when a pile of pending intent-feedback
 items is worth working through.
 
-## The tool
+## The tool: the markup skill
+
+Intent review **requires the markup skill**. Install it once per machine, beside this one:
 
 ```sh
-node <skill-dir>/scripts/review.mjs --help
+npx skills add crumley/markup
 ```
 
-`<skill-dir>` is the directory holding this skill's `SKILL.md`. The script is one file, needs Node
-20 or later and nothing else, and is built from the skill's home repository (`tools/review/`) —
-never edit it by hand. Commands: `scan` drafts a packet from a repository, `validate` checks a
-packet or decisions file, `serve` runs the review page, `locate` re-finds the human's notes in the
-current files, and `check-apply` confirms, before you edit anything, that the decisions answer the
-packet and that every edit they land is still anchored in the tree as it is now. The full contract —
-every field, which fields go with which mode, the item kinds, the id conventions, and how to migrate
-a version 1 packet — is in [`review-contract.md`](review-contract.md), beside this file.
+Then find its directory, `<markup-skill-dir>` — the one holding markup's own `SKILL.md`. Skill
+installers put sibling skills under the same skills root, so look in this order and use the first
+that has `scripts/markup.mjs`:
+
+1. **Beside this skill**: `"$(dirname <skill-dir>)/markup"`, where `<skill-dir>` is the directory
+   holding this skill's `SKILL.md`, as your harness gave it — the skills root it loaded this skill
+   from. Take the parent textually (`dirname`), not as `<skill-dir>/..`: a skill directory is often
+   a symlink, and `..` would resolve through it to wherever the link points.
+2. **The harness-neutral root**: `~/.agents/skills/markup`, where `npx skills add` installs.
+3. Wherever your harness says it loaded a skill named `markup` from.
+
+If none has it, stop and tell the human the skill is missing and how to install it; never improvise
+a review without the tool. Then:
+
+```sh
+node <markup-skill-dir>/scripts/markup.mjs --help
+```
+
+The script is one file, needs Node 20 or later and nothing else, and is generated in Markup's home
+repository — never edit it by hand. Commands used here: `scan intent` drafts a packet from a
+repository (`packet intent` is the same command), `validate` checks a packet or decisions file,
+`serve` runs the page, `locate` re-finds the human's notes in the current files, and `check-apply`
+confirms, before you edit anything, that the decisions answer the packet and that every edit they
+land is still anchored in the tree as it is now. The full contract — every field, which fields go
+with which mode, the item kinds, the id conventions, and how to migrate a version 1 packet — is in
+markup's
+[`references/contract.md`](https://github.com/crumley/markup/blob/main/.agents/skills/markup/references/contract.md)
+(in `<markup-skill-dir>/references/contract.md`). The documents are named `markup-packet` and
+`markup-decisions` (the draft, `markup-draft`); files written under the older `intent-review-*`
+names still read.
 
 Write packets and decisions to a scratch directory **outside** the repository: a packet carries a
 snapshot of the repository's files (a few megabytes for a mid-sized one) and is never committed.
@@ -53,7 +81,7 @@ procedures land, say so if asked for one, rather than improvising a different co
 read a ref without checking it out):
 
 ```sh
-node <skill-dir>/scripts/review.mjs scan --repo <repo> --out <scratch>/packet.json [--files repo|intent] [--no-inline] [--no-questions]
+node <markup-skill-dir>/scripts/markup.mjs scan intent --repo <repo> --out <scratch>/packet.json [--files repo|intent] [--no-inline] [--no-questions]
 ```
 
 Intent feedback lives in each design entry's `intent-feedback.md`, with ids `IF-NNN`. A repository
@@ -78,7 +106,7 @@ is written and the entry that raised it, and drafts a placeholder `question` for
 **Branch review (branch mode).** From the repository, against the branch's base:
 
 ```sh
-node <skill-dir>/scripts/review.mjs scan --repo <repo> --base <base-ref> --head <branch> --out <scratch>/packet.json
+node <markup-skill-dir>/scripts/markup.mjs scan intent --repo <repo> --base <base-ref> --head <branch> --out <scratch>/packet.json
 ```
 
 This lists every changed intent file, every intent-feedback item the branch raises, re-statuses, or
@@ -89,7 +117,8 @@ The scan does the mechanical half. Then **edit the packet** (it is JSON; a small
 the scan and writes the packet, checking every quote, is easier to rerun than hand edits) and write
 the half only you can write. Each item asks the human **one question** and answers it in three
 stages — **What**, **So what**, **Now what** — which the page shows in that order, with the ruling
-at the foot. The full field list is in [`review-contract.md`](review-contract.md).
+at the foot. The full field list is in markup's
+[`contract.md`](https://github.com/crumley/markup/blob/main/.agents/skills/markup/references/contract.md).
 
 - **The question** (`question`, required). One line, asked of the human, naming the decision the
   item really puts to them — "Should the multiplexer seam say it carries hosting only, and leave
@@ -178,8 +207,10 @@ at the foot. The full field list is in [`review-contract.md`](review-contract.md
 - **Branch changes** — What: what the change does (the diff is shown with it). So what: what it does
   to the intent. Now what: approve/amend/reject, with what each leads to.
 - **Hand-added items** — any kind, with an id that says what it is (`group/<slug>`,
-  `finding/<slug>`; see [`review-contract.md`](review-contract.md#ids)) and a real `source`: the
-  file and line where the thing is written, since that is where its outcome is recorded.
+  `finding/<slug>`; see the contract's
+  [Ids](https://github.com/crumley/markup/blob/main/.agents/skills/markup/references/contract.md#ids))
+  and a real `source`: the file and line where the thing is written, since that is where its outcome
+  is recorded.
 - **Groups** — many small items of one shape (a backlog of inline intent feedback that already
   landed, three items from one entry that one ruling settles) read better as one item with `members`
   naming each ledger id, its own question, and one numbered passage or edit per member. A ruling on
@@ -198,7 +229,7 @@ verbatim, draft questions, one-sided recommendations, ruled items without their 
 collisions without a composed wording):
 
 ```sh
-node <skill-dir>/scripts/review.mjs validate --packet <scratch>/packet.json
+node <markup-skill-dir>/scripts/markup.mjs validate --packet <scratch>/packet.json
 ```
 
 A version 1 packet (from an older skill) is refused with the field-by-field mapping to version 2.
@@ -206,19 +237,21 @@ A version 1 packet (from an older skill) is refused with the field-by-field mapp
 ## 2. Run the review
 
 ```sh
-node <skill-dir>/scripts/review.mjs serve --packet <scratch>/packet.json --out <scratch>/decisions.json --open
+node <markup-skill-dir>/scripts/markup.mjs serve --packet <scratch>/packet.json --out <scratch>/decisions.json --open
 ```
 
 Run it as a long-running or background process and **wait for it to exit**; do not stop it. It
-prints `review: open <url>` — give the human that exact URL (it carries an access token; `--open`
+prints `markup: open <url>` — give the human that exact URL (it carries an access token; `--open`
 also opens it in their browser), say what the packet holds, and that their work autosaves.
 
 The page opens on a **home page** that explains the review, what the human is asked to do (with
 counts), how to work through it, and a legend of every ruling, mark, colour, note kind, and key
 (also one `?` away from any view) — so you need not repeat that. Deep links land elsewhere:
 `<url>#item=<id>`, `#file=<path>`, `#view=queue|files|dashboard|submit`. `--theme <id|file.json>`
-starts in a theme; the human can also pick one in the page, or add their own
-([`review-themes.md`](review-themes.md)).
+starts in a theme; the human can also pick one in the page, or add their own in
+`~/.config/markup/themes/` (`$MARKUP_CONFIG` or `$XDG_CONFIG_HOME/markup` when set; themes left in
+the old `~/.config/intent-review/` still load while that directory is absent) — markup's
+[`references/themes.md`](https://github.com/crumley/markup/blob/main/.agents/skills/markup/references/themes.md).
 
 Exit codes: `0` — the decisions file is written (whole) · `3` — the human abandoned the review (no
 decisions; their draft is kept beside the decisions path and restores on the next `serve` of the
@@ -231,7 +264,7 @@ without `accept-with-changes` and with a `note` possible beside any verdict). Be
 anything, check that the decisions still fit the tree you are about to change:
 
 ```sh
-node <skill-dir>/scripts/review.mjs check-apply --packet <scratch>/packet.json --decisions <scratch>/decisions.json --repo <repo>
+node <markup-skill-dir>/scripts/markup.mjs check-apply --packet <scratch>/packet.json --decisions <scratch>/decisions.json --repo <repo>
 ```
 
 It confirms the digest (the decisions answer this packet), says whether the repository has moved
@@ -275,9 +308,9 @@ Then the Status lines (design edits), then everything else the notes ask for.
     `adjudicated — <link> (<reviewer>'s ruling: <one line>)` — the merge is the adjudication act, so
     the Status says adjudicated only after it. Name the reviewer; a repository whose history already
     writes a role ("owner's ruling") keeps its own convention. Nothing else owns this flip: after
-    the merge, `scan --merged <#n,…>` (the changes you know merged — the tool asks no forge) offers
-    each ruled item awaiting one of them as a routine settling item with the Status edit, or make
-    the edit yourself in a small design change.
+    the merge, `scan intent --merged <#n,…>` (the changes you know merged — the tool asks no forge)
+    offers each ruled item awaiting one of them as a routine settling item with the Status edit, or
+    make the edit yourself in a small design change.
 - **Intent edits ride their own change** — a branch and pull request that touches only `intent/`,
   never bundled into a build or design change. Group by coherent ruling (typically one change per
   design entry's accepted intent-feedback items).

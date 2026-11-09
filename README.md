@@ -5,13 +5,12 @@ stands on four parallel trees — `intent/` (the what & why), `design/` (the how
 chronological record of building it), `src/` (the code), and `test/` (the tests) — with `intent`
 governing the other three. The full rules live in the skill below.
 
-This repository is the canonical home for three things:
+This repository is the canonical home for two things — documents and skills, no code:
 
-| Piece                                                                                | What it is                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [`.agents/skills/intent-architecture/`](.agents/skills/intent-architecture/SKILL.md) | The **agent skill**: establishes, bootstraps, or refactors any repository into the four-leg structure. Agent- and model-agnostic content in the portable `SKILL.md` format.                                                                                                                                                                                                                                                                             |
-| [`tools/review/`](tools/review/README.md)                                            | The **review tool** the skill ships: a local page that explains a repository and links everything in it, where the human rules on open intent feedback, open questions, and a branch's intent changes, annotates any file, and hands the decisions back to the agent. Source and its own four legs here; the built single file is [`scripts/review.mjs`](.agents/skills/intent-architecture/scripts/review.mjs) in the skill, runnable with plain Node. |
-| [`template/`](template/)                                                             | The **getting-started repository template**: a ready-to-copy skeleton with the four legs, per-leg READMEs, `AGENTS.md`, and a pinned, mise-driven Markdown gate (dprint formatting + lychee link checking) that is green from a cold copy. Code toolchains are deliberately left to the adopting project's first design entry.                                                                                                                          |
+| Piece                                                                                | What it is                                                                                                                                                                                                                                                                                                                     |
+| ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| [`.agents/skills/intent-architecture/`](.agents/skills/intent-architecture/SKILL.md) | The **agent skill**: establishes, bootstraps, or refactors any repository into the four-leg structure. Agent- and model-agnostic content in the portable `SKILL.md` format.                                                                                                                                                    |
+| [`template/`](template/)                                                             | The **getting-started repository template**: a ready-to-copy skeleton with the four legs, per-leg READMEs, `AGENTS.md`, and a pinned, mise-driven Markdown gate (dprint formatting + lychee link checking) that is green from a cold copy. Code toolchains are deliberately left to the adopting project's first design entry. |
 
 [`AGENTS.md`](AGENTS.md) is the guide for working in this repo itself (`CLAUDE.md` is a symlink to
 it — guidance lives once, under the harness-neutral name).
@@ -49,16 +48,17 @@ check gate green, and then grows the intent from what you tell it.
 ## Review a repository's intent
 
 Ask the agent to **review the open intent feedback** (or the intent, or a branch's intent changes)
-and the skill prepares a review packet, opens the review page, and carries out your decisions. The
-page is one file inside the skill, so it needs only Node 20+:
+and the skill prepares a packet, opens a local review page, and carries out your decisions. Intent
+review is a specialisation of [Markup](https://github.com/crumley/markup), which ships the page and
+the intent scanner, so it needs the markup skill installed beside this one (and Node 20+):
 
 ```sh
-node .agents/skills/intent-architecture/scripts/review.mjs --help
+npx skills add crumley/markup
 ```
 
 How an agent drives it:
-[`references/review.md`](.agents/skills/intent-architecture/references/review.md). What the tool is
-and how it is built: [`tools/review/`](tools/review/README.md).
+[`references/review.md`](.agents/skills/intent-architecture/references/review.md). What the page is
+and how it is built: [crumley/markup](https://github.com/crumley/markup).
 
 ## Start a repo from the template
 
@@ -79,9 +79,8 @@ its intent filled in.
 
 Markdown here is held to the same bar the template ships: `mise run fmt` formats (dprint),
 `mise run check` verifies formatting and links (dprint + lychee), and CI additionally proves the
-template's own gate is green from a cold checkout (`mise run template-check`) and runs the review
-tool's gate — lint, types, tests, and a check that the committed bundle matches its source
-(`mise run review-check`). See [`mise.toml`](mise.toml).
+template's own gate is green from a cold checkout (`mise run template-check`). There is no code
+toolchain at the root. See [`mise.toml`](mise.toml).
 
 ## License
 

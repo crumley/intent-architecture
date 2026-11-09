@@ -2,10 +2,6 @@
 #   mise run check            — this repo's Markdown gate (dprint + lychee)
 #   mise run check (template) — the template's full gate, proving it is green
 #                               from a cold checkout for anyone who copies it.
-#   mise run check (tools/review) — the review tool's gate: lint, types, tests
-#                               (the bundle run under the pinned Node), and the
-#                               drift check that the committed bundle in the
-#                               skill is exactly what its source builds.
 #
 # mise-action installs mise, reads mise.toml, and provisions the exact pinned
 # toolchain that `mise install` provisions on a laptop.
@@ -31,6 +27,3 @@ jobs:
 
       - run: mise install && mise run check
         working-directory: template
-
-      - run: mise install && mise run check
-        working-directory: tools/review
