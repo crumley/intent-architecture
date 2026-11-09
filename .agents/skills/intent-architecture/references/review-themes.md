@@ -38,8 +38,8 @@ Make it available in either of two ways:
   starts in it. `--theme <id>` starts in any theme by id.
 
 A file that does not validate is reported when the tool starts and skipped; a theme never stops a
-review. Your last choice is remembered in `prefs.json` beside the themes directory — never in the
-repository being reviewed.
+review. Your last choice — and whether edits show inline or before / after — is remembered in
+`prefs.json` beside the themes directory, never in the repository being reviewed.
 
 ## Tokens
 
@@ -51,8 +51,9 @@ repository being reviewed.
 | `accent`, `accent-ink`, `accent-soft`                                         | Primary buttons and active tabs; text on them; selected backgrounds         |
 | `heading`, `heading-2`                                                        | Titles and top-level headings; lower headings                               |
 | `xref`                                                                        | Linked identifiers — SF ids, entry numbers, decisions, file paths           |
-| `focus`, `focus-line`                                                         | The passage in question                                                     |
-| `accept`, `amend`, `decline`, `defer`, `revise`                               | The five rulings                                                            |
+| `accent-passage`                                                              | Passage markers (the numbered badges), their margin rule and tint           |
+| `focus`, `focus-line`                                                         | A spot jumped to from a link; the selected toggle                           |
+| `accept`, `amend`, `decline`, `defer`, `revise`                               | The rulings; accept with changes mixes `accept` toward `amend`              |
 | `hl-comment`, `hl-question`, `hl-suggestion`, `hl-intent-here`, `hl-mismatch` | Note highlights, by kind                                                    |
 | `add-bg`, `add-strong`, `del-bg`, `del-strong`                                | Diff lines, and the changed words within them                               |
 | `tk-kw`, `tk-str`, `tk-com`, `tk-num`, `tk-fn`, `tk-ty`, `tk-key`             | Syntax: keywords, strings, comments, numbers, calls, types, keys            |

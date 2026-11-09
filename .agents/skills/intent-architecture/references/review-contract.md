@@ -1,4 +1,4 @@
-# The review contract: packet (version 2) and decisions (version 1)
+# The review contract: packet (version 2) and decisions (version 2)
 
 The whole interface between an agent and the review tool is two JSON files: the **packet** the agent
 writes and `serve` reads, and the **decisions** the page writes when the human submits. This is the
@@ -60,6 +60,7 @@ type Item = {
   statusLine?: string; // the Status as written in the repository
   attention?: 'judgment' | 'routine'; // either mode; the queue orders by it
   ruled?: { by: string; on: string; ruling: string; where?: string }; // already ruled: confirm the wording
+  decided?: { verdict: Verdict; by: string; on: string; words?: string; pass?: number }; // ruled in an earlier pass: context only
   members?: string[]; // a grouped item: the ledger ids it stands for
   source: { path: string; line: number }; // where the item is written
   evidence: Ref[]; // the passages in question — quoted under What
@@ -88,7 +89,7 @@ type Ref = {
 };
 type ContextRef = Ref & { why: string }; // REQUIRED: why the file is shown
 type Edit = { path: string; before: string; after: string; note?: string }; // before: verbatim
-type Verdict = 'accept' | 'amend' | 'decline' | 'defer' | 'revise';
+type Verdict = 'accept' | 'accept-with-changes' | 'amend' | 'revise' | 'decline' | 'defer';
 type FileChange = {
   path: string;
   status: 'added' | 'modified' | 'deleted' | 'renamed';
@@ -171,6 +172,15 @@ stands for several (its `members` name them, as the ledger does), `finding/<slug
 `source` — the file and line where the thing it is about is written — because the agent's executor
 writes the outcome there.
 
+### Carrying earlier rulings
+
+A later pass may keep items the human already ruled on in an earlier pass, as context — to read
+beside what is still open, and so collisions with them still show. Give each one
+`decided: { verdict, by, on, words?, pass? }` (the verdict and the words the human wrote with it, as
+the earlier decisions file has them). The page shows them read-only at the foot of the queue,
+outside the counts; a verdict on one is refused; `validate` gives no advice on them. Drop them once
+the earlier rulings are carried out — they are a bridge between passes, not a ledger.
+
 ### Which fields go with which mode
 
 | Field                               | main    | branch   |
@@ -180,30 +190,34 @@ writes the outcome there.
 | `attention`                         | allowed | allowed  |
 | everything else                     | allowed | allowed  |
 
-## The decisions (version 1, unchanged)
+## The decisions (version 2)
 
 ```ts
 type Decisions = {
   kind: 'intent-review-decisions';
-  version: 1;
+  version: 2;
   packet: { title: string; createdAt: string; mode: 'main' | 'branch'; iteration?: number; digest: string }; // sha256:<hex> of the packet file
   reviewer: string;
   submittedAt: string;
-  comment?: string;
+  comment?: string; // the reviewer's word on the whole pass
   overall?: { verdict: 'approve' | 'request-changes' | 'comment'; note?: string }; // required in branch mode
-  verdicts: (
-    | { item: string; verdict: 'accept'; note?: string }
-    | { item: string; verdict: 'amend'; wording: string; note?: string }
-    | { item: string; verdict: 'decline'; why: string; note?: string }
-    | { item: string; verdict: 'defer'; ruling?: string; note?: string }
-    | { item: string; verdict: 'revise'; request: string; note?: string }
-  )[]; // only items ruled on; an absent item is unreviewed
+  verdicts: ( // only items ruled on; an absent item is unreviewed. Exactly one words field each:
+    | { item: string; verdict: 'accept'; note?: string } // guidance, never new wording
+    | { item: string; verdict: 'accept-with-changes'; instructions: string } // the agent rewords to these
+    | { item: string; verdict: 'amend'; wording: string } // the reviewer's exact words
+    | { item: string; verdict: 'revise'; request: string } // rework and bring it back
+    | { item: string; verdict: 'decline'; why: string }
+    | { item: string; verdict: 'defer'; ruling?: string }
+  )[];
   annotations: {
     id: string;
-    target: { kind: 'file'; path: string } | { kind: 'item'; item: string; section: string };
+    target:
+      | { kind: 'file'; path: string } // a file in the snapshot
+      | { kind: 'item'; item: string; section: string } // the item as written (its sections)
+      | { kind: 'field'; item: string; field: string }; // the agent's own text in the packet
     item?: string; // the item open when a file note was made
     selector: { exact: string; prefix: string; suffix: string };
-    at?: { start: number; end: number; line: number }; // a hint into the snapshot
+    at?: { start: number; end: number; line: number }; // a hint into the target's text
     kind: 'comment' | 'question' | 'suggestion' | 'intent-here' | 'mismatch';
     comment: string; // may be empty only for a suggestion
     suggestion?: string; // a suggestion's replacement for `exact`
@@ -212,9 +226,30 @@ type Decisions = {
 };
 ```
 
+**One words field per verdict.** The page shows one box per ruling, so a verdict carries only its
+own field; a second is refused. **Accept with changes** means "land it, changed as I describe": the
+agent writes the new wording to the `instructions` and lands it — it does not come back for another
+look (that is `revise`). **An accept's note is guidance, not wording**: if a note would change what
+the edit says, do not land the edit as shown with an improvised change — bring it back next pass as
+a ruled item (`ruled`, the note as the ruling) with the wording that lands it, to confirm.
+
+**Field paths.** A `field` target names agent-written text in an item by its path in the packet:
+dotted keys with `[n]` indexes — `question`, `title`, `ruled.ruling`, `what.facts`, `what.ranInto`,
+`what.assumption`, `evidence[0].note`, `soWhat.stakes`, `soWhat.relations[1].note`,
+`nowWhat.summary`, `nowWhat.edits[0].after` (the proposed wording) and `.note`,
+`nowWhat.composed[0].edits[0].after`, `nowWhat.ifAccepted`, `nowWhat.ifDeclined`,
+`nowWhat.recommendation.why`, `context[0].why`. The path must name text in that item. Such a note is
+about the agent's proposal, not the repository: `locate` reports it as agent text, and it is
+answered or acted on in the next proposal. A note on an edit's **current** wording anchors to the
+file itself.
+
+**Version 1** decisions (and drafts) are still read, under their own rules: the five verdicts of
+version 1, a `note` beside any verdict, and `file` and `item` targets only. A version 1 draft
+restored by the page keeps every word: a note beside another verdict joins that verdict's one box.
+
 A verdict on a **grouped** item applies to every member: carry it out member by member. The draft
 (`<out>.draft.json`) has the decisions' shape with `kind: 'intent-review-draft'` and no
-`submittedAt`.
+`submittedAt`. Verdicts on a `decided` item are refused: it was ruled in an earlier pass.
 
 ## Migrating a version 1 packet
 
@@ -231,4 +266,5 @@ A verdict on a **grouped** item applies to every member: carry it out member by 
 | `analysis.ifAccepted`, `ifDeclined`, `recommendation` | `nowWhat.ifAccepted`, `ifDeclined`, `recommendation`      |
 | `context[].note`                                      | `context[].why` (required)                                |
 | a ruled item's Status line only                       | plus `ruled: { by, on, ruling, where? }`                  |
+| —                                                     | `decided` (optional): ruled in an earlier pass, context   |
 | `attention` in branch mode only                       | `attention` in either mode                                |

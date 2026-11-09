@@ -354,14 +354,16 @@ and an item without one is invisible to the grep (tools that read the entries ca
 Once settled, the Status line **records the disposition**, never rewriting the item's original text:
 `adjudicated — <link to the intent PR/commit/entry that settled it>` or `declined — <one-line why>`;
 a ruling made but not yet landed reads
-`pending — ruled by <who> <date>, awaiting the intent edit: <the ruling>`. An older entry that
-records intent feedback **inline** in its README ends each bullet with `_Disposition:_ <status> — …`
-instead; the second grep pattern below, and the review tool, read that shape too. **Why:** without a
-recorded disposition, the open intent-feedback queue lives in someone's head or one agent's session
-memory — exactly the unrecorded state this structure exists to eliminate. Because the disposition
-lives in the entry, the queue is derived, never kept: the design README documents a grep over the
-entries rather than an index of pending intent-feedback items (a hand-kept index is a second copy of
-state the entries already hold, and it drifts):
+`pending — ruled by <who> <date>, awaiting the intent edit: <the ruling>` (a ruling confirmed again
+later adds `, confirmed <date>` before "awaiting"). An older entry that records intent feedback
+**inline** in its README ends each bullet with `_Disposition:_ <status> — …` instead (a ruling not
+yet landed: a trailing `_Status:_ pending — ruled by …`); the second grep pattern below, and the
+review tool, read that shape too. **Why:** without a recorded disposition, the open intent-feedback
+queue lives in someone's head or one agent's session memory — exactly the unrecorded state this
+structure exists to eliminate. Because the disposition lives in the entry, the queue is derived,
+never kept: the design README documents a grep over the entries rather than an index of pending
+intent-feedback items (a hand-kept index is a second copy of state the entries already hold, and it
+drifts):
 
 ```sh
 grep -rn -e '\*\*Status:\*\* *`\?pending' -e '`pending`\.' design/*/

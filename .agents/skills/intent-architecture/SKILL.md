@@ -369,8 +369,8 @@ to install; `<skill-dir>` is this skill's directory). The loop:
    it matters), and **Now what** (each proposed revision as an edit, what each choice leads to, and
    your recommendation, last). `validate` it and work through its advice.
 2. **Run** `serve` in the background, give the human the URL it prints, and wait for it to exit. The
-   human rules on each item (accept, amend, decline, defer, revise), annotates any file, and
-   submits.
+   human rules on each item (accept, accept with changes, amend, revise, decline, defer), annotates
+   any file or the agent's own text, and submits.
 3. **Carry out** the decisions: intent edits in their own change, never bundled with design or build
    work; each intent-feedback item's Status line updated (ruled-and-awaiting until the intent change
    merges, then adjudicated; or declined with the human's why); every note acted on; a branch's
