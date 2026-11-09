@@ -42,8 +42,9 @@ long as this contract holds.
 - **Work in progress survives, apart from the result.** An unsubmitted review is kept as a draft
   beside the decisions file and is never mistaken for decisions. _Why:_ principle 6, without
   weakening the previous constraint.
-- **Annotations carry their anchor in full.** Each annotation records the file (or item) it is on,
-  the exact text quoted, and enough surrounding text to find it again. _Why:_ principle 7.
+- **Annotations carry their anchor in full.** Each annotation records what it is on — a file, an
+  item's own text, or a named field of the agent's text in the packet — the exact text quoted, and
+  enough surrounding text to find it again. _Why:_ principle 7.
 
 ## What this is NOT
 
@@ -62,7 +63,9 @@ long as this contract holds.
 ## Left to implementation
 
 - The concrete schemas, the invocation, the exit codes, and where the draft lives — planned in
-  [`../../design/0001-review-tool-v1/`](../../design/0001-review-tool-v1/README.md).
+  [`../../design/0001-review-tool-v1/`](../../design/0001-review-tool-v1/README.md); the packet's
+  version 2 (the question-first item) in
+  [`../../design/0002-review-format-v2/`](../../design/0002-review-format-v2/README.md).
 
 ## Open questions
 

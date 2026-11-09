@@ -59,10 +59,11 @@ pushes back on the intent. Each intent-feedback item has a stable id (`IF-NNN`),
 touches, the assumption made to keep moving, and a proposed revision. The file is created only when
 the build raises an intent-feedback item: an entry without one is normal, and the absence is the
 record that building found no friction — a file saying "none" is tokens every later reader pays for
-nothing. An intent-feedback item is `pending` until settled; once settled, its disposition is
-**appended** to it — `adjudicated` with a link to the intent change that settled it, or `declined`
-with a one-line why — never rewriting the original text, so what building surfaced stays on the
-record.
+nothing. An intent-feedback item says it is open: it carries an explicit `**Status:** pending` line
+from the moment it is raised, so the grep below finds it without guessing. Once settled, that line
+records its disposition — `adjudicated` with a link to the intent change that settled it, or
+`declined` with a one-line why — never rewriting the item's original text, so what building surfaced
+stays on the record.
 
 **`build-log.md`** (optional) — one block per iteration, newest at the bottom, holding only what the
 commits cannot: what building **forced or revealed** (a failing test that changed the design, a

@@ -5,7 +5,9 @@
 //
 // Two modes (design 0001, "Two modes"):
 //   main   — the repository as it stands (working tree, or a git ref): every open
-//            intent-feedback item and every cross-cutting open question.
+//            intent-feedback item (in an intent-feedback file, or written inline in an
+//            entry's README the older way), every cross-cutting open question that is not
+//            a standing watch, and every ADR still proposed.
 //   branch — a branch against its base (base...head): every changed intent file,
 //            every intent-feedback item the branch raises or re-statuses, every changed decision and
 //            design entry, each carrying its diff.
@@ -15,19 +17,26 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { basename, join, posix, relative, sep } from 'node:path';
 import {
   type ChangeStatus,
+  type ContextRef,
+  draftQuestion,
   type FileChange,
   type IfStatus,
   type Item,
   type LedgerRow,
   PACKET_KIND,
+  PACKET_VERSION,
   type Packet,
   type Ref,
   type RepoFile,
+  type Ruled,
   type Section,
+  shortIdOf,
 } from './schema.ts';
 
 export type ScanOptions = {
   questions?: boolean;
+  /** main mode: also offer open intent feedback written inline in entry READMEs (default true). */
+  inline?: boolean;
   now?: Date;
   /** main mode: read this git ref instead of the working tree. */
   ref?: string;
@@ -37,6 +46,12 @@ export type ScanOptions = {
   head?: string;
   /** What the snapshot carries: every tracked text file (default), or intent/ only. */
   files?: 'repo' | 'intent';
+  /**
+   * main mode: changes the agent knows have merged (`#116`, a URL…). A ruled item whose
+   * Status awaits one of them is offered as settling: the edit that flips it to adjudicated.
+   * The tool asks no forge; the agent says what merged.
+   */
+  merged?: string[];
 };
 
 /** Files larger than this are left out of the snapshot (and listed as omitted). */
@@ -47,6 +62,7 @@ export type ScanResult = { packet: Packet; warnings: string[] };
 // `SF-NNN` (the vocabulary before the rename). Ids are normalized to `IF-NNN`; source text keeps its spelling.
 const SF_HEADING = /^#{2,3}\s+([IS]F-\d+)\s*(?:[—–:-]+\s*(.*))?$/;
 const FEEDBACK_FILE = /^design\/(\d{4}-[^/]+)\/(?:intent|spec)-feedback\.md$/;
+const ENTRY_README = /^design\/(\d{4}-[^/]+)\/README\.md$/;
 const normalizeIf = (id: string) => id.replace(/^S(?=F-)/, 'I'); // SF-NNN -> IF-NNN
 const BULLET = /^- \*\*([^*]+?):\*\*\s?(.*)$/;
 const LINK = /\]\(([^)\s]+)\)/g;
@@ -65,23 +81,52 @@ function scanMain(root: string, opts: ScanOptions): ScanResult {
   const fileText = new Map(readIntent(tree).map((f) => [f.path, f.text]));
   const items: Item[] = [];
   const ledger: LedgerRow[] = [];
+  const { files, omitted } = snapshot(tree, opts.files === 'intent' ? ['intent/'] : ['']);
+  const inSnapshot = new Set(files.map((f) => f.path));
 
+  const open = (sf: ParsedSf) => sf.row.status === 'pending' || sf.row.status === 'ruled';
   for (const sf of allSfs(tree, fileText, warnings)) {
     ledger.push(sf.row);
-    if (sf.row.status === 'pending' || sf.row.status === 'ruled') items.push(sf.item);
+    if (open(sf)) items.push(sf.item);
+  }
+  const inline = allInline(tree, fileText, warnings, new Set(ledger.map((r) => r.id)));
+  for (const sf of inline) {
+    ledger.push(sf.row);
+    if (open(sf) && opts.inline !== false) items.push(sf.item);
+  }
+  if (inline.length) {
+    const open = inline.filter((x) => x.row.status === 'pending').length;
+    warnings.push(
+      `${inline.length} intent-feedback items are written inline in entry READMEs; ${open} carry no settled disposition` +
+        (opts.inline === false
+          ? ' (left out of the items: --no-inline)'
+          : ' — group them for the human'),
+    );
   }
   if (opts.questions !== false) {
     const text = fileText.get(OPEN_QUESTIONS);
-    if (text !== undefined) items.push(...parseOpenQuestions(text, OPEN_QUESTIONS));
+    if (text !== undefined) {
+      const oq = parseOpenQuestions(text, OPEN_QUESTIONS);
+      items.push(...oq.items);
+      if (oq.standing.length) {
+        warnings.push(
+          `${oq.standing.length} open question(s) marked _Standing watch_ left out: ${oq.standing.join(', ')}`,
+        );
+      }
+    }
   }
   items.push(...proposedDecisions(tree));
-  const { files, omitted } = snapshot(tree, opts.files === 'intent' ? ['intent/'] : ['']);
+  if (opts.merged?.length) {
+    const n = settleMerged(items, (p) => tree.read(p), opts.merged);
+    warnings.push(`--merged: ${n} ruled item(s) await a merged change and are offered as settling`);
+  }
+  for (const it of items) withEntryContext(it, tree, inSnapshot);
 
   const name = basename(root);
   const ref = opts.ref === undefined ? gitRef(root, 'HEAD') : gitRef(root, opts.ref);
   const packet: Packet = {
     kind: PACKET_KIND,
-    version: 1,
+    version: PACKET_VERSION,
     mode: 'main',
     title: `Intent review — ${name}`,
     createdAt: (opts.now ?? new Date()).toISOString(),
@@ -105,14 +150,17 @@ function proposedDecisions(tree: Tree): Item[] {
     const status = /\*\*Status:\*\*\s*`?([a-z-]+)/i.exec(text)?.[1]?.toLowerCase();
     if (status !== 'proposed') continue;
     const title = /^#\s+(.+)$/m.exec(text)?.[1]?.trim() ?? path;
-    out.push({
+    const item: Item = {
       id: path,
       kind: 'decision',
+      question: '',
       title,
       source: { path, line: 1 },
       evidence: [{ path }],
       sections: [],
-    });
+    };
+    item.question = draftQuestion(item);
+    out.push(item);
   }
   return out;
 }
@@ -150,6 +198,75 @@ function allSfs(tree: Tree, intent: Map<string, string>, warnings: string[]): Pa
     out.push(...parsed.sfs);
   }
   return out;
+}
+
+/** Intent feedback written inline under an entry README's `## Intent feedback` heading. */
+function allInline(
+  tree: Tree,
+  intent: Map<string, string>,
+  warnings: string[],
+  known: Set<string>,
+): ParsedSf[] {
+  const out: ParsedSf[] = [];
+  for (const path of tree.list('design/')) {
+    const m = ENTRY_README.exec(path);
+    if (!m || (m[1] as string).startsWith('0000-')) continue;
+    for (const sf of parseInlineFeedback(tree.read(path) ?? '', path, m[1] as string, intent)) {
+      if (known.has(sf.item.id)) {
+        warnings.push(
+          `${path}:${sf.item.source.line}: ${sf.item.id} is also in a feedback file; kept that one`,
+        );
+        continue;
+      }
+      out.push(sf);
+    }
+  }
+  return out;
+}
+
+/**
+ * Context the scanner can name without judgment: where an intent-feedback item is
+ * written (the whole block) and the design entry that raised it — each only when the
+ * snapshot carries it, so the packet stays self-contained.
+ */
+function withEntryContext(it: Item, tree: Tree, inSnapshot: Set<string>): void {
+  const ctx: ContextRef[] = [...(it.context ?? [])];
+  const has = (p: string) => ctx.some((c) => c.path === p);
+  if (isIfKind(it.kind) && inSnapshot.has(it.source.path) && !has(it.source.path)) {
+    const text = tree.read(it.source.path) ?? '';
+    const end = blockEnd(text, it.source.line);
+    ctx.push({
+      path: it.source.path,
+      lines: { start: it.source.line, end },
+      why:
+        it.category === 'inline'
+          ? 'Where this intent-feedback item is written, inline in its design entry.'
+          : 'Where this intent-feedback item is written, as the build raised it.',
+    });
+  }
+  const entry = /^design\/(\d{4}-[^/]+)\//.exec(it.source.path)?.[1];
+  const readme = entry ? `design/${entry}/README.md` : undefined;
+  if (readme && inSnapshot.has(readme) && !has(readme)) {
+    ctx.push({ path: readme, why: 'The design entry that raised it: what was being built.' });
+  }
+  if (ctx.length) it.context = ctx;
+}
+
+const isIfKind = (k: string) => k === 'if' || k === 'sf';
+
+/** The last line of the Markdown block starting at `line`: up to the next heading or item. */
+function blockEnd(text: string, line: number): number {
+  const lines = text.split('\n');
+  const first = lines[line - 1] ?? '';
+  const heading = /^#{1,6}\s/.test(first);
+  let end = line;
+  for (let k = line; k < lines.length; k++) {
+    const l = lines[k] as string;
+    if (/^#{1,6}\s/.test(l)) break;
+    if (!heading && (/^- /.test(l) || (/^\S/.test(l) && (lines[k - 1] ?? '').trim() === ''))) break;
+    if (l.trim() !== '') end = k + 1;
+  }
+  return end;
 }
 
 // ---------------------------------------------------------------------------
@@ -201,6 +318,7 @@ function scanBranch(root: string, base: string, opts: ScanOptions): ScanResult {
     const item: Item = {
       id: `intent-change/${c.path}`,
       kind: 'intent-change',
+      question: draftQuestion({ id: c.path, kind: 'intent-change', title: c.path }),
       title: `${c.path} — ${c.status}`,
       attention: 'judgment',
       source: { path: c.path, line: firstHunkLine(fc.patch) },
@@ -262,16 +380,23 @@ function scanBranch(root: string, base: string, opts: ScanOptions): ScanResult {
         ? 'deleted'
         : 'modified';
     const item: Item = {
-      id: isDecision ? `design/${key}` : `design/${key}`,
+      id: `design/${key}`,
       kind: isDecision ? 'decision' : 'design-entry',
+      question: '',
       title: `${h1 ?? (key === '(other)' ? 'design/ (other files)' : key)} — ${status}`,
       source: { path: main?.path ?? 'design/', line: 1 },
       evidence: [],
       sections: [],
       changes: cs.map(change),
     };
+    item.question = draftQuestion(item);
     const context = mainText ? intentLinks(mainText, main?.path ?? '', intentText) : [];
-    if (context.length) item.context = context;
+    if (context.length) {
+      item.context = context.map((r) => ({
+        ...r,
+        why: 'Intent this design entry says it serves.',
+      }));
+    }
     (isDecision ? decisionItems : entryItems).push(item);
   }
   items.push(...decisionItems, ...entryItems);
@@ -280,7 +405,7 @@ function scanBranch(root: string, base: string, opts: ScanOptions): ScanResult {
   const name = basename(root);
   const packet: Packet = {
     kind: PACKET_KIND,
-    version: 1,
+    version: PACKET_VERSION,
     mode: 'branch',
     title: `Branch review — ${name}: ${headRef} vs ${base}`,
     createdAt: (opts.now ?? new Date()).toISOString(),
@@ -367,7 +492,6 @@ export function parseSpecFeedback(
     const bullets = parseBullets(block);
     const status = bullets.find((b) => b.key === 'status');
     const statusLine = status?.text.replace(/\s+/g, ' ').trim();
-    const sfStatus = classifyStatus(statusLine);
     const slice = bullets.find((b) => b.key === 'slice');
     const evidence = slice ? slicePassages(slice.text, path, intent) : [];
     const id = `${entry}/${h.id}`;
@@ -383,28 +507,196 @@ export function parseSpecFeedback(
     }
     if (preamble) sections.push({ key: 'entry-context', label: 'Entry context', text: preamble });
 
-    const row: LedgerRow = {
+    const parsed = feedbackItem({
       id,
       entry,
       title: h.title,
-      status: sfStatus,
-      slices: [...new Set(evidence.map((p) => p.path))],
-      source,
-    };
-    if (statusLine) row.statusLine = statusLine;
-    const item: Item = {
-      id,
-      kind: 'if',
-      title: h.title,
-      status: sfStatus,
+      statusLine,
       source,
       evidence,
       sections,
-    };
-    if (statusLine) item.statusLine = statusLine;
-    return { row, item, body: block.join('\n').trim() };
+    });
+    if (!statusLine) parsed.row.inferred = 'no Status line: pending by default';
+    return { ...parsed, body: block.join('\n').trim() };
   });
   return { sfs, warnings };
+}
+
+/** The ledger row and the item for one intent-feedback item, however it was written. */
+function feedbackItem(f: {
+  id: string;
+  entry: string;
+  title: string;
+  statusLine: string | undefined;
+  source: { path: string; line: number };
+  evidence: Ref[];
+  sections: Section[];
+}): { row: LedgerRow; item: Item } {
+  const status = classifyStatus(f.statusLine);
+  const row: LedgerRow = {
+    id: f.id,
+    entry: f.entry,
+    title: f.title,
+    status,
+    slices: [...new Set(f.evidence.map((p) => p.path))],
+    source: f.source,
+  };
+  if (f.statusLine) row.statusLine = f.statusLine;
+  const item: Item = {
+    id: f.id,
+    kind: 'if',
+    question: '',
+    title: f.title,
+    status,
+    source: f.source,
+    evidence: f.evidence,
+    sections: f.sections,
+  };
+  item.question = draftQuestion(item);
+  if (f.statusLine) item.statusLine = f.statusLine;
+  const ruled = status === 'ruled' ? parseRuled(f.statusLine ?? '') : undefined;
+  if (ruled) item.ruled = ruled;
+  return { row, item };
+}
+
+/**
+ * A ruled-but-pending Status line, as the review skill writes it:
+ * `pending — ruled by <who> <YYYY-MM-DD> [(<where>)], awaiting the intent edit: <ruling> [(<change>)]`.
+ * Tolerant of what a later pass adds between the date and "awaiting" — a re-confirmation
+ * (`, confirmed 2026-11-08 in the review of #109,`), a second parenthesis — which is
+ * kept as `where`, so a re-confirmed item still reads as ruled.
+ */
+export function parseRuled(line: string): Ruled | undefined {
+  const m =
+    /ruled by\s+(.+?)\s+(?:on\s+)?(\d{4}-\d{2}-\d{2})([\s\S]*?)\bawaiting (?:the |its )?intent edit\b:?\s*([\s\S]*)$/i.exec(
+      line.replace(/`/g, ''),
+    );
+  if (!m) return undefined;
+  const ruling = (m[4] as string).trim();
+  if (!ruling) return undefined;
+  const out: Ruled = { by: (m[1] as string).trim(), on: m[2] as string, ruling };
+  // Between the date and "awaiting": a parenthesis alone is the where; anything longer is kept whole.
+  const mid = (m[3] as string).trim().replace(/^[,;\s]+|[,;\s]+$/g, '');
+  const paren = /^\(([^()]*)\)$/.exec(mid);
+  const where = paren ? (paren[1] as string).trim() : mid.replace(/^\(|\)$/g, '').trim();
+  if (where) out.where = where;
+  return out;
+}
+
+// Inline intent feedback: the shape older entries used before intent-feedback files —
+// `- **IF-001** — <slice>, <section>. _Friction:_ … _Assumption…:_ … _Proposed revision:_ …`
+// under the README's `## Intent feedback` heading, settled by a trailing
+// `_Disposition:_ adjudicated — <link>` (or `declined — <why>`), or by an explicit Status.
+const INLINE_HEAD = /^##\s+(?:intent|spec)[- ]feedback\b/i;
+const INLINE_ITEM = /^- \*\*([IS]F-\d+)\*\*\s*[—–:-]*\s?(.*)$/;
+const INLINE_LABEL =
+  /(?:_|\*\*)(Friction|Assumption[^:_*]{0,40}|Proposed revision|Disposition|Status|Adjudicated|Declined)(?::_|:\*\*|\*\*:|_:)\s*/g;
+
+export function parseInlineFeedback(
+  text: string,
+  path: string,
+  entry: string,
+  intent: Map<string, string>,
+): ParsedSf[] {
+  const lines = text.split('\n');
+  const out: ParsedSf[] = [];
+  let inSection = false;
+  let cur: { line: number; id: string; lines: string[] } | null = null;
+  const flush = () => {
+    if (cur) out.push(inlineItem(cur, path, entry, intent));
+    cur = null;
+  };
+  lines.forEach((l, i) => {
+    if (/^##\s/.test(l)) {
+      flush();
+      inSection = INLINE_HEAD.test(l);
+      return;
+    }
+    if (!inSection) return;
+    const m = INLINE_ITEM.exec(l);
+    if (m) {
+      flush();
+      cur = { line: i + 1, id: normalizeIf(m[1] as string), lines: [m[2] as string] };
+    } else if (cur && (l.trim() === '' || l.startsWith('  '))) {
+      cur.lines.push(l.replace(/^ {2}/, ''));
+    } else flush();
+  });
+  flush();
+  return out;
+}
+
+function inlineItem(
+  cur: { line: number; id: string; lines: string[] },
+  path: string,
+  entry: string,
+  intent: Map<string, string>,
+): ParsedSf {
+  const body = cur.lines.join('\n').trim();
+  const marks = [...body.matchAll(INLINE_LABEL)];
+  const lead = (marks.length ? body.slice(0, marks[0]?.index) : body).trim();
+  const parts: { label: string; text: string }[] = [];
+  marks.forEach((m, n) => {
+    const from = (m.index as number) + m[0].length;
+    const to = marks[n + 1]?.index ?? body.length;
+    parts.push({ label: (m[1] as string).trim(), text: body.slice(from, to).trim() });
+  });
+  const disposition = parts.find((x) =>
+    /^(disposition|status|adjudicated|declined)$/i.test(x.label),
+  );
+  const said = disposition?.text.replace(/\s+/g, ' ').replace(/\*\*/g, '').trim();
+  // `_Adjudicated:_ <how>` and `_Declined:_ <why>` say the disposition in the label itself.
+  let statusLine =
+    said && /^(adjudicated|declined)$/i.test(disposition?.label ?? '')
+      ? `${(disposition?.label ?? '').toLowerCase()} — ${said}`
+      : said;
+  let inferred: string | undefined;
+  if (!statusLine && /`pending`\.\s*$/.test(body)) statusLine = 'pending.';
+  if (!statusLine && /\*\*Resolution\b/.test(body)) {
+    statusLine = 'adjudicated — a Resolution paragraph in the entry records the ruling.';
+    inferred = 'a Resolution paragraph, no disposition line';
+  }
+  if (!statusLine) inferred = 'no Status or disposition line';
+  const sections: Section[] = [];
+  if (lead) sections.push({ key: 'slice', label: 'Slice', text: lead });
+  for (const x of parts) {
+    if (x === disposition) continue;
+    const key = keyOf(x.label);
+    if (sections.some((s) => s.key === key)) continue;
+    sections.push({ key, label: x.label, text: x.text });
+  }
+  const friction = parts.find((x) => /^friction$/i.test(x.label))?.text ?? lead;
+  const parsed = feedbackItem({
+    id: `${entry}/${cur.id}`,
+    entry,
+    title: firstSentence(friction),
+    statusLine: inferred ? undefined : statusLine,
+    source: { path, line: cur.line },
+    evidence: slicePassages(lead, path, intent, /"([^"]+)"/g),
+    sections,
+  });
+  parsed.row.form = 'inline';
+  parsed.item.category = 'inline';
+  if (inferred) {
+    parsed.row.inferred = inferred;
+    if (statusLine) {
+      parsed.row.status = classifyStatus(statusLine);
+      parsed.item.status = parsed.row.status;
+    }
+  }
+  return { ...parsed, body };
+}
+
+/** A plain one-line title from Markdown prose: its first sentence, links and markers dropped. */
+function firstSentence(text: string): string {
+  const plain = text
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/[`*_]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const s = /^(.{12,}?[.;:!?])(\s|$)/.exec(plain)?.[1] ?? plain;
+  const t = s.replace(/[.;:]$/, '');
+  if (t.length <= 110) return t;
+  return `${t.slice(0, 107).replace(/\s+\S*$/, '')}…`;
 }
 
 type Bullet = { key: string; label: string; text: string };
@@ -450,11 +742,16 @@ export function classifyStatus(line: string | undefined): IfStatus {
 }
 
 /** Links into intent/ from a Slice bullet, resolved from the entry's directory. */
-function slicePassages(text: string, sfPath: string, intent: Map<string, string>): Ref[] {
+function slicePassages(
+  text: string,
+  sfPath: string,
+  intent: Map<string, string>,
+  quoted: RegExp = /\("([^"]+)"/g,
+): Ref[] {
   const dir = posix.dirname(sfPath);
   const out: Ref[] = [];
   const section = /_([^_]+)_/.exec(text.replace(/\[[^\]]*\]\([^)]*\)/g, ''))?.[1];
-  const quotes = [...text.matchAll(/\("([^"]+)"/g)].map((m) => m[1] as string);
+  const quotes = [...text.matchAll(quoted)].map((m) => m[1] as string);
   for (const m of text.matchAll(LINK)) {
     const target = (m[1] as string).split('#')[0] as string;
     const path = posix.normalize(posix.join(dir, target));
@@ -498,9 +795,16 @@ export function findQuote(file: string, quotes: string[]): string | undefined {
 // ---------------------------------------------------------------------------
 // Open questions: the cross-cutting bullets, before the per-slice index.
 
-export function parseOpenQuestions(text: string, path: string): Item[] {
+/** Marks a cross-cutting bullet as a check to repeat, not a question to settle. */
+export const STANDING_WATCH = /_Standing watch[.:]?_/i;
+
+export function parseOpenQuestions(
+  text: string,
+  path: string,
+): { items: Item[]; standing: string[] } {
   const lines = text.split('\n');
   const items: Item[] = [];
+  const standing: string[] = [];
   let inSection = false;
   let pastIndex = false;
   let cur: { line: number; raw: string[] } | null = null;
@@ -508,7 +812,8 @@ export function parseOpenQuestions(text: string, path: string): Item[] {
     if (!cur) return;
     const raw = cur.raw.join('\n');
     const title = /^- \*\*(.+?)\*\*/.exec(raw)?.[1]?.replace(/[.:]$/, '').trim();
-    if (title && !raw.includes('<')) {
+    if (title && STANDING_WATCH.test(raw)) standing.push(title);
+    else if (title && !raw.includes('<')) {
       const body = raw
         .replace(/^- /, '')
         .split('\n')
@@ -517,6 +822,7 @@ export function parseOpenQuestions(text: string, path: string): Item[] {
       items.push({
         id: `OQ/${slug(title)}`,
         kind: 'question',
+        question: draftQuestion({ id: '', kind: 'question', title }),
         title,
         status: 'pending',
         source: { path, line: cur.line },
@@ -552,7 +858,7 @@ export function parseOpenQuestions(text: string, path: string): Item[] {
     seen.set(it.id, n);
     if (n > 1) it.id = `${it.id}-${n}`;
   }
-  return items;
+  return { items, standing };
 }
 
 function slug(s: string): string {
@@ -661,4 +967,75 @@ function gitRef(root: string, ref: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Settling: once the intent change a ruling awaited has merged, its Status becomes
+// adjudicated — the merge is the adjudication act. Nothing else owns that flip, so the
+// scanner proposes it when the agent says which changes merged.
+
+/** The link a Status line gives for a merged change, matched against a `--merged` value. */
+function mergedLink(statusLine: string, merged: string[]): string | undefined {
+  const tokens = statusLine.match(/\[[^\]]*\]\([^)]*\)|https?:\/\/[^\s)]+|#\d+/g) ?? [];
+  for (const m of merged) {
+    const n = /^#?(\d+)$/.exec(m.trim())?.[1];
+    const hit = tokens.find((t) =>
+      n
+        ? new RegExp(`(?:^#|/pull/|/merge_requests/|/pulls/)${n}(?!\\d)`).test(t)
+        : t.includes(m.trim()),
+    );
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
+/**
+ * Turn each ruled item whose Status awaits a merged change into a settling item: one
+ * routine edit flipping the Status to `adjudicated — <link> (<reviewer>'s ruling: …)`.
+ * Returns how many were turned. Items whose Status text cannot be found verbatim are left.
+ */
+export function settleMerged(
+  items: Item[],
+  read: (path: string) => string | undefined,
+  merged: string[],
+): number {
+  let n = 0;
+  for (const it of items) {
+    if (!it.ruled || !it.statusLine) continue;
+    const link = mergedLink(it.statusLine, merged);
+    if (!link) continue;
+    const text = read(it.source.path) ?? '';
+    const words = it.statusLine.split(/\s+/).filter(Boolean);
+    const re = new RegExp(words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+'));
+    const before = re.exec(text)?.[0];
+    if (!before) continue;
+    const esc = link.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const ruling = it.ruled.ruling
+      .replace(new RegExp(`\\s*\\(?${esc}\\)?`), '')
+      .replace(/\s+$/, '')
+      .replace(/[.;,]$/, '');
+    const after = `adjudicated — ${link} (${it.ruled.by}'s ruling: ${ruling})`;
+    const sid = shortIdOf(it.id);
+    it.category = 'settle';
+    it.attention = 'routine';
+    it.question = `Record ${sid} as adjudicated — the intent change it awaited (${link}) has merged?`;
+    it.what = {
+      facts: `The Status reads “${it.statusLine}”. The change it awaits, ${link}, has merged (the agent said so to the scan).`,
+    };
+    it.soWhat = {
+      stakes:
+        'Until the Status says adjudicated, every open-items scan offers this item again as ruled-but-pending. The merge was the adjudication act; this records it.',
+    };
+    it.nowWhat = {
+      summary:
+        'Flip the Status line to adjudicated, linking the merged change and keeping the ruling in one line.',
+      edits: [{ path: it.source.path, before, after, note: 'the Status line' }],
+      ifAccepted: 'The item drops out of the open items; the ledger counts it adjudicated.',
+      ifDeclined: 'The Status keeps awaiting an edit that has already landed.',
+      recommendation: { verdict: 'accept', why: 'The intent change merged; this is bookkeeping.' },
+    };
+    delete it.ruled;
+    n++;
+  }
+  return n;
 }

@@ -30,12 +30,16 @@ producer would reopen it.
 
 ## What every producer owes the reviewer
 
+- **A question.** Every item names the decision it asks for, as a question to the human. _Why:_ a
+  reviewer who knows what is being decided reads everything else as bearing on it, rather than as
+  text to make sense of first.
 - **Evidence, quoted and located.** Every item points at the passages it is about — intent, code, or
   both — exactly enough that the tool can show them beside it. _Why:_ a ruling made without the text
   in view is a ruling on the agent's summary, not on the repository.
-- **A fair analysis.** What accepting and declining each lead to, the strongest case for the option
-  not recommended, and the item's relations to others. _Why:_ the human rules; an analysis that
-  argues only one side quietly moves the ruling to the agent.
+- **A fair analysis.** The facts kept apart from the advice; what accepting and declining each lead
+  to, the strongest case for the option not recommended, and the item's relations to others —
+  including where two items would change the same text. _Why:_ the human rules; an analysis that
+  argues only one side, or mixes its opinion into the facts, quietly moves the ruling to the agent.
 - **Triage.** What needs judgment is marked apart from what is routine, so attention goes where it
   matters first. _Why:_ the scarce resource is attention (see
   [`../00-foundation/00-vision.md`](../00-foundation/00-vision.md)).

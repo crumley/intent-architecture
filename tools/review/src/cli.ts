@@ -5,14 +5,17 @@
 //   0 done (serve: decisions written)   2 usage error or invalid input
 //   3 review abandoned (no decisions)   1 anything unexpected
 
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { locate } from './anchor.ts';
+import { checkApply } from './apply.ts';
+import { fieldText } from './fields.ts';
 import { type ScanOptions, scanRepo } from './scan.ts';
 import {
+  advise,
   formatErrors,
   type Packet,
   type ValidationError,
@@ -32,13 +35,16 @@ export const TOOL_VERSION = '1.0.0';
 const USAGE = `intent review tool ${TOOL_VERSION} — review a repository's intent and open intent feedback
 
 usage:
-  review.mjs scan     --repo <dir> [--out <packet.json>] [--ref <ref>] [--no-questions]
-  review.mjs scan     --repo <dir> --base <ref> [--head <ref>] [--out <packet.json>]
+  review.mjs scan     --repo <dir> [--out <packet.json>] [--ref <ref>] [--files repo|intent]
+                      [--no-questions] [--no-inline] [--merged <#n,…>]
+  review.mjs scan     --repo <dir> --base <ref> [--head <ref>] [--files repo|intent] [--out <packet.json>]
   review.mjs validate (--packet <file> | --decisions <file>)
   review.mjs serve    --packet <file> --out <decisions.json> [--port <n>] [--open] [--theme <id|file.json>]
   review.mjs locate   --decisions <file> --repo <dir> [--packet <file>]
+  review.mjs check-apply --packet <file> --decisions <file> --repo <dir>
 
-exit codes: 0 done · 2 usage error or invalid input · 3 review abandoned · 1 unexpected
+exit codes: 0 done · 2 usage error or invalid input · 3 review abandoned ·
+  4 check-apply found drift (a before no longer in the tree, a note orphaned, a digest mismatch) · 1 unexpected
 
 themes: built-in ${THEMES.map((t) => t.id).join(', ')}; custom themes are JSON files in
   <config>/themes/ (config: $INTENT_REVIEW_CONFIG, else $XDG_CONFIG_HOME/intent-review, else
@@ -56,10 +62,14 @@ class InputError extends Error {
 type Flags = Record<string, string | true>;
 
 const KNOWN: Record<string, { values: string[]; switches: string[] }> = {
-  scan: { values: ['repo', 'out', 'ref', 'base', 'head'], switches: ['no-questions'] },
+  scan: {
+    values: ['repo', 'out', 'ref', 'base', 'head', 'files', 'merged'],
+    switches: ['no-questions', 'no-inline'],
+  },
   validate: { values: ['packet', 'decisions'], switches: [] },
   serve: { values: ['packet', 'out', 'port', 'theme'], switches: ['open'] },
   locate: { values: ['decisions', 'repo', 'packet'], switches: [] },
+  'check-apply': { values: ['packet', 'decisions', 'repo'], switches: [] },
 };
 
 export function parseArgs(argv: string[]): { command: string; flags: Flags } {
@@ -140,6 +150,8 @@ export async function run(argv: string[], io: Io): Promise<number> {
         return await cmdServe(flags, io);
       case 'locate':
         return cmdLocate(flags, io);
+      case 'check-apply':
+        return cmdCheckApply(flags, io);
       default:
         throw new UsageError(`unknown command "${command}"`);
     }
@@ -167,7 +179,20 @@ function cmdScan(flags: Flags, io: Io): number {
   if (base === undefined && head !== undefined) throw new UsageError('--head needs --base');
   if (base !== undefined && ref !== undefined)
     throw new UsageError('--ref is for main mode; use --head');
-  const opts: ScanOptions = { questions: flags['no-questions'] !== true };
+  const files = str('files');
+  if (files !== undefined && files !== 'repo' && files !== 'intent') {
+    throw new UsageError('--files is "repo" (every tracked text file, the default) or "intent"');
+  }
+  const opts: ScanOptions = {
+    questions: flags['no-questions'] !== true,
+    inline: flags['no-inline'] !== true,
+  };
+  if (files !== undefined) opts.files = files;
+  const merged = str('merged');
+  if (merged !== undefined) {
+    if (base !== undefined) throw new UsageError('--merged is for main mode');
+    opts.merged = merged.split(/[,\s]+/).filter(Boolean);
+  }
   if (base !== undefined) opts.base = base;
   if (head !== undefined) opts.head = head;
   if (ref !== undefined) opts.ref = ref;
@@ -190,6 +215,9 @@ function cmdScan(flags: Flags, io: Io): number {
       `review: wrote ${out} — ${packet.mode} mode: ${kinds}; ` +
         `${packet.ledger?.length ?? 0} intent-feedback items in the ledger, ${packet.files.length} files`,
     );
+    io.out(
+      "review: next — write each item's question, what, soWhat, and nowWhat (the skill's references/review.md), then validate",
+    );
   } else {
     io.out(json.trimEnd());
   }
@@ -207,6 +235,10 @@ function cmdValidate(flags: Flags, io: Io): number {
     io.out(
       `review: ${p} is a valid packet (${packet.items.length} items, ${packet.files.length} files)`,
     );
+    const advice = advise(packet);
+    for (const a of advice) io.out(`review: advice: ${a.path}: ${a.message}`);
+    if (advice.length)
+      io.out(`review: ${advice.length} pieces of advice — not errors, but worth fixing`);
     return 0;
   }
   const { value } = readJsonFile(d as string);
@@ -283,6 +315,29 @@ function cmdLocate(flags: Flags, io: Io): number {
   const packet = typeof flags.packet === 'string' ? loadPacket(flags.packet).packet : null;
   const results = v.value.annotations.map((a) => {
     let path: string | null = null;
+    if (a.target.kind === 'field') {
+      // Agent-written text lives in the packet, not the repository: nothing to re-find there.
+      const { item, field } = a.target;
+      const it = packet?.items.find((i) => i.id === item);
+      const text = it ? fieldText(it, field) : undefined;
+      if (text === undefined)
+        return {
+          id: a.id,
+          item,
+          field,
+          status: 'unknown' as const,
+          note: packet
+            ? `agent-written text; "${field}" names no text in "${item}"`
+            : 'agent-written text in the packet; pass --packet to check the quote',
+        };
+      return {
+        id: a.id,
+        item,
+        field,
+        note: 'agent-written text in the packet, not in the repository',
+        ...locate(text, a.selector),
+      };
+    }
     if (a.target.kind === 'file') path = a.target.path;
     else {
       const target = a.target;
@@ -305,6 +360,46 @@ function cmdLocate(flags: Flags, io: Io): number {
   });
   io.out(JSON.stringify(results, null, 2));
   return 0;
+}
+
+/**
+ * Before carrying out decisions: do they answer this packet, and is every edit they land
+ * still anchored in the repository as it is now? Prints the report; exit 4 on any drift.
+ */
+function cmdCheckApply(flags: Flags, io: Io): number {
+  const { packet, digest } = loadPacket(need(flags, 'packet'));
+  const decisionsPath = need(flags, 'decisions');
+  const { value } = readJsonFile(decisionsPath);
+  const v = validateDecisions(value, packet);
+  if (!v.ok) throw new InputError(`${decisionsPath} is not a valid decisions file`, v.errors);
+  const root = resolve(need(flags, 'repo'));
+  const read = (path: string) => {
+    try {
+      return readFileSync(join(root, path), 'utf8');
+    } catch {
+      return undefined;
+    }
+  };
+  let head: string | undefined;
+  try {
+    const git = (args: string[]) =>
+      execFileSync('git', ['-C', root, ...args], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }).trim();
+    head = `${git(['rev-parse', '--abbrev-ref', 'HEAD'])}@${git(['rev-parse', '--short=12', 'HEAD'])}`;
+  } catch {
+    head = undefined;
+  }
+  const report = checkApply(packet, digest, v.value, read, head);
+  io.out(JSON.stringify(report, null, 2));
+  const bad = report.edits.filter((e) => e.status !== 'ok').length;
+  io.err(
+    report.ok
+      ? `review: ready to apply — ${report.edits.length} edit(s) anchored${report.ref.moved ? ` (the tree moved since the snapshot: ${report.ref.packet} → ${report.ref.head}; every before still holds)` : ''}`
+      : `review: drift — ${bad} edit(s) not anchored, digest ${report.digest.match ? 'matches' : 'does NOT match'}; re-read the report before editing`,
+  );
+  return report.ok ? 0 : 4;
 }
 
 /** Where preferences and custom themes live: never inside the reviewed repository. */

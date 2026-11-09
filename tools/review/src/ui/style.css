@@ -1741,12 +1741,6 @@ td.st-adjudicated {
 /* ---------------------------------------------------------------- narrow screens */
 
 @media (max-width: 1180px) {
-  .layout.queue {
-    grid-template-columns: 260px minmax(0, 1fr);
-  }
-  .layout.queue .side {
-    display: none;
-  }
   .layout.files {
     grid-template-columns: 240px minmax(0, 1fr);
   }
@@ -1760,8 +1754,12 @@ td.st-adjudicated {
 }
 @media (max-width: 760px) {
   .layout.queue,
+  .layout.queue.nav-open,
   .layout.files {
     grid-template-columns: 1fr;
+  }
+  .layout.queue .side {
+    display: none;
   }
   .nav {
     display: none;
@@ -2205,4 +2203,1287 @@ td.st-adjudicated {
   .verdicts .vbtn {
     padding: 7px 6px;
   }
+}
+
+/* ================================================================ the item, v2
+   Type scale (one step each): question 27 · stage heading 19 · lead 16.5 ·
+   body 15.5 · subhead 14 · small 13.5 · meta 12.5 · label 11 (caps).
+   Rhythm: spacing tokens below; stages are separated by --sp-7 and a hairline,
+   blocks inside a stage by --sp-5, a heading from its body by --sp-3.
+   Measure: the middle column holds prose at ~68ch. Colour is kept for meaning:
+   the passages in question (focus tokens), the ruling, and the verdict chips. */
+
+:root {
+  --fs-question: 27px;
+  --fs-stage: 19px;
+  --fs-lead: 16.5px;
+  --fs-body: 15.5px;
+  --fs-subhead: 14px;
+  --fs-small: 13.5px;
+  --fs-meta: 12.5px;
+  --fs-label: 11px;
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+  --sp-7: 44px;
+  --measure: 68ch;
+}
+
+.meta {
+  font-size: var(--fs-meta);
+  color: var(--muted);
+}
+.callout-label {
+  font-size: var(--fs-label);
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+/* layout: the middle column must hold the measure at 1440 */
+.layout.queue {
+  grid-template-columns: 264px minmax(0, 1fr) minmax(360px, 37%);
+}
+.nav-toggle {
+  display: none;
+}
+.ic-list::before {
+  content: "☰";
+  font-size: 12px;
+  margin-right: 6px;
+}
+@media (max-width: 1280px) {
+  .layout.queue {
+    grid-template-columns: 232px minmax(0, 1fr) minmax(320px, 38%);
+  }
+}
+@media (max-width: 1180px) {
+  .layout.queue {
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 42%);
+  }
+  .layout.queue > .nav {
+    display: none;
+  }
+  .layout.queue.nav-open > .nav {
+    display: block;
+    position: absolute;
+    z-index: 6;
+    inset: 0 auto 0 0;
+    width: 300px;
+    box-shadow: var(--shadow);
+  }
+  .nav-toggle {
+    display: inline-flex;
+  }
+}
+
+.qt {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* the document column */
+.doc {
+  font-size: var(--fs-body);
+  max-width: calc(var(--measure) + 80px);
+  padding: var(--sp-6) 40px var(--sp-6);
+}
+.doc .prose,
+.doc .prose.compact {
+  font-size: var(--fs-body);
+  line-height: 1.68;
+  max-width: var(--measure);
+}
+.item-head {
+  margin-bottom: var(--sp-6);
+}
+.item-head .eyebrow-row {
+  margin-bottom: var(--sp-4);
+}
+.question {
+  font-size: var(--fs-question);
+  line-height: 1.24;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  color: var(--heading);
+  text-wrap: balance;
+  max-width: 30ch;
+  margin: 0 0 var(--sp-3);
+}
+.subtitle {
+  font-size: var(--fs-subhead);
+  line-height: 1.5;
+  color: var(--muted);
+  margin: 0;
+  max-width: var(--measure);
+}
+.subtitle .mono {
+  color: var(--ink-2);
+  font-size: 0.92em;
+}
+.subtitle .sep {
+  margin: 0 8px;
+  color: var(--faint);
+}
+.item-head .callout {
+  margin: var(--sp-4) 0 0;
+  max-width: var(--measure);
+}
+.callout p {
+  margin: var(--sp-1) 0 0;
+}
+.callout .callout-label + p {
+  margin-top: var(--sp-1);
+}
+.callout.ruled-note {
+  background: color-mix(in srgb, var(--defer) 9%, var(--surface));
+  border-left: 3px solid var(--defer);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  font-size: var(--fs-small);
+  color: var(--ink);
+}
+.callout.ruled-note .callout-label {
+  color: var(--defer);
+}
+
+/* stages: What · So what · Now what */
+.stage {
+  margin: 0;
+  padding: var(--sp-5) 0 var(--sp-2);
+  border-top: 1px solid var(--line);
+}
+.stage + .stage {
+  margin-top: var(--sp-5);
+}
+.stage-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-3);
+}
+.stage-label {
+  flex: none;
+  min-width: 5.6em;
+  font-size: var(--fs-label);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--accent);
+}
+.stage-title,
+.doc h2.stage-title {
+  font-size: var(--fs-stage);
+  font-weight: 650;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  text-transform: none;
+  color: var(--ink);
+}
+.stage-body > .prose:first-child,
+.stage-body > .lead-prose:first-child {
+  margin-top: 0;
+}
+.lead-prose .prose,
+.doc .lead-prose .prose {
+  font-size: var(--fs-lead);
+  color: var(--ink);
+}
+.subhead,
+.doc h3.subhead {
+  font-size: var(--fs-subhead);
+  font-weight: 650;
+  color: var(--ink-2);
+  margin: var(--sp-5) 0 var(--sp-2);
+}
+.stage-body > .subhead:first-child {
+  margin-top: 0;
+}
+details.stage > summary {
+  list-style: none;
+  cursor: pointer;
+}
+details.stage > summary::-webkit-details-marker {
+  display: none;
+}
+details.stage > summary .stage-head {
+  margin-bottom: var(--sp-1);
+}
+.stage-preview {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+  color: var(--muted);
+  font-size: var(--fs-small);
+  line-height: 1.5;
+  padding-left: calc(5.6em * 11 / 13.5 + var(--sp-3));
+  max-width: calc(var(--measure) + 6em);
+}
+details.stage[open] .stage-preview {
+  display: none;
+}
+details.stage[open] > summary .stage-head {
+  margin-bottom: var(--sp-3);
+}
+details.stage:not([open]) {
+  padding-bottom: var(--sp-3);
+}
+
+/* quoted passages and edits */
+.quoted,
+.edit {
+  margin: 0 0 var(--sp-4);
+  max-width: var(--measure);
+}
+.qhead {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+  font-size: var(--fs-meta);
+}
+.qnote {
+  font-size: var(--fs-small);
+  color: var(--muted);
+  margin: 6px 0 0;
+}
+.edit .qnote {
+  margin: 0 0 6px;
+}
+.doc .excerpt .prose {
+  font-size: 15px;
+}
+.doc .wdiff {
+  font-size: 15px;
+  max-width: var(--measure);
+}
+.pn {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 10px;
+  font: 700 11.5px / 1 var(--sans);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  background: var(--focus);
+  border: 1.5px solid var(--focus-line);
+}
+button.pn:hover {
+  background: color-mix(in srgb, var(--focus-line) 35%, var(--focus));
+}
+.pn-evidence {
+  border-style: dashed;
+}
+.collision {
+  margin-top: var(--sp-3);
+  padding: 10px 14px;
+  border-left: 3px solid var(--defer);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  background: color-mix(in srgb, var(--defer) 8%, transparent);
+}
+.collision .callout-label {
+  color: var(--defer);
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: var(--fs-small);
+}
+.collision p {
+  margin: 4px 0 8px;
+}
+.collision .wdiff {
+  background: var(--surface);
+}
+.rel li.collide .col-flag {
+  color: var(--defer);
+  font-weight: 600;
+}
+.doc .rel {
+  max-width: var(--measure);
+}
+
+/* consequences and the agent's advice */
+.two.outcomes {
+  gap: var(--sp-3);
+  max-width: var(--measure);
+}
+.outcome {
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.outcome .callout-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.outcome .callout-label::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accept);
+}
+.outcome.o-no .callout-label::before {
+  background: var(--decline);
+}
+.doc .outcome .prose {
+  font-size: 14.5px;
+  line-height: 1.6;
+}
+.advice {
+  --vc: var(--accent);
+  margin-top: var(--sp-5);
+  padding: 12px 16px 14px;
+  border: 1px dashed var(--line-2);
+  border-radius: var(--radius);
+  max-width: var(--measure);
+}
+.advice-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.advice p {
+  margin: 0;
+  font-size: var(--fs-body);
+}
+.advice.r-accept {
+  --vc: var(--accept);
+}
+.advice.r-amend {
+  --vc: var(--amend);
+}
+.advice.r-decline {
+  --vc: var(--decline);
+}
+.advice.r-defer {
+  --vc: var(--defer);
+}
+.advice.r-revise {
+  --vc: var(--revise);
+}
+
+/* folds inside a stage */
+.fold-title {
+  font-size: var(--fs-small);
+  font-weight: 600;
+  color: var(--ink-2);
+}
+details.fold > summary:hover .fold-title {
+  color: var(--ink);
+}
+.stage .sec.fold {
+  margin: var(--sp-5) 0 0;
+}
+.as-written {
+  margin-left: 22px;
+  max-width: var(--measure);
+}
+.aw-label {
+  font-size: var(--fs-label);
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  margin: var(--sp-3) 0 var(--sp-1);
+}
+.as-written .prose,
+.doc .as-written .prose {
+  font-size: 14.5px;
+}
+.doc > .hint,
+.doc > .sec.fold {
+  margin-top: var(--sp-6);
+}
+
+/* ---------------------------------------------------------------- side pane, v2 */
+
+.pane-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: 12px 16px 10px;
+}
+.pane-titles {
+  min-width: 0;
+}
+.pane-title {
+  font-size: var(--fs-subhead);
+  font-weight: 650;
+  color: var(--heading);
+}
+.pane-sub {
+  font-size: var(--fs-meta);
+  color: var(--muted);
+}
+.pnav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  flex: none;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  font-size: var(--fs-meta);
+  color: var(--ink-2);
+}
+.pnav-at {
+  padding: 0 6px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.side-tabs {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  gap: 2px;
+  padding: 0 12px;
+}
+.tg {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  flex-wrap: wrap;
+}
+.tg-label {
+  flex: none;
+  align-self: center;
+  width: 100%;
+  margin: 6px 4px 2px;
+  font-size: 10.5px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+.tg-related .tg-label {
+  color: var(--faint);
+}
+.stab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.stab-nums {
+  color: var(--focus-line);
+  font-family: var(--sans);
+  font-weight: 650;
+  letter-spacing: 0.04em;
+}
+.tg-related .stab {
+  color: var(--faint);
+}
+.tg-related .stab:hover {
+  color: var(--ink-2);
+}
+.tg-related .stab.on {
+  color: var(--ink-2);
+  box-shadow:
+    0 -1px 0 var(--line) inset,
+    0 2px 0 var(--faint) inset;
+}
+.side-path {
+  gap: var(--sp-2);
+}
+.path-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.seg-sm {
+  display: inline-flex;
+  gap: 2px;
+}
+.seg-sm .pill {
+  font-size: 12px;
+  padding: 3px 9px;
+  border-radius: 6px;
+  border: 1px solid var(--line-2);
+  color: var(--muted);
+  background: transparent;
+}
+.seg-sm .pill.on {
+  color: var(--ink);
+  border-color: var(--focus-line);
+  background: var(--focus);
+}
+.why-here {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 9px 16px;
+  background: var(--sunken);
+  border-bottom: 1px solid var(--line);
+  font-size: var(--fs-small);
+  color: var(--ink-2);
+}
+.why-here .callout-label {
+  flex: none;
+}
+.side-body {
+  padding: 22px 28px 80px 34px;
+}
+.side-body .codeview {
+  margin: 0 -28px 0 -34px;
+}
+.side-body.is-related {
+  background: color-mix(in srgb, var(--surface) 55%, var(--bg));
+}
+.side-body.is-related .prose {
+  color: var(--ink-2);
+}
+
+/* passages, marked in place */
+.pass {
+  border-radius: 2px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+.pass-edit {
+  background: var(--focus);
+  box-shadow: 0 1px 0 var(--focus-line);
+}
+.pass-evidence {
+  background: color-mix(in srgb, var(--focus) 60%, transparent);
+}
+.pass-context {
+  background: color-mix(in srgb, var(--xref) 14%, transparent);
+}
+.pblk {
+  position: relative;
+}
+.prose .pblk::after {
+  content: "";
+  position: absolute;
+  left: -16px;
+  top: 3px;
+  bottom: 3px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--focus-line);
+}
+.prose .pblk-evidence::after {
+  background: color-mix(in srgb, var(--focus-line) 55%, transparent);
+}
+.prose .pblk-context::after {
+  background: color-mix(in srgb, var(--xref) 55%, transparent);
+}
+.codeview .pblk {
+  box-shadow: inset 3px 0 0 var(--focus-line);
+}
+.codeview .pblk-context {
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--xref) 55%, transparent);
+}
+.pdeco {
+  user-select: none;
+  -webkit-user-select: none;
+  font-family: var(--sans);
+  white-space: normal;
+}
+.plabel {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  margin: var(--sp-5) 0 var(--sp-2) -16px;
+  font-size: var(--fs-meta);
+  line-height: 1.4;
+  color: var(--ink-2);
+}
+.codeview .plabel {
+  margin: var(--sp-4) 0 var(--sp-1);
+  padding-left: 12px;
+}
+.plabel-text {
+  font-weight: 600;
+}
+.plabel-context .plabel-text {
+  font-weight: 500;
+  color: var(--muted);
+}
+.plabel-also {
+  color: var(--defer);
+  font-weight: 650;
+}
+.pctx {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--xref);
+}
+.pdiff {
+  margin: var(--sp-2) 0 var(--sp-5);
+  padding: 10px 14px 12px;
+  border: 1px solid color-mix(in srgb, var(--focus-line) 45%, var(--line));
+  border-radius: var(--radius);
+  background: var(--raised);
+}
+.codeview .pdiff {
+  margin: var(--sp-2) 12px var(--sp-4);
+}
+.pdiff .wdiff {
+  border: 0;
+  padding: 0;
+  margin-top: 6px;
+  background: transparent;
+  font-size: 14px;
+  max-width: none;
+}
+@keyframes pass-flash {
+  0% {
+    background-color: color-mix(in srgb, var(--focus-line) 40%, transparent);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+.flash {
+  animation: pass-flash 1.6s ease-out;
+}
+.pass-after {
+  background: var(--add-bg);
+  box-shadow: 0 1px 0 var(--accept);
+}
+.members {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin: var(--sp-2) 0 0;
+  font-size: var(--fs-meta);
+  max-width: var(--measure);
+}
+.member {
+  font-family: var(--mono);
+  color: var(--ink-2);
+}
+
+/* refinements after the first render */
+.question {
+  font-size: 23.5px;
+  line-height: 1.28;
+  max-width: 40ch;
+}
+.pn-sm {
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  font-size: 10px;
+  border-width: 1px;
+}
+.stab-nums {
+  display: inline-flex;
+  gap: 2px;
+}
+.plabel {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  column-gap: var(--sp-2);
+}
+.plabel > .pn,
+.plabel > .pctx {
+  margin-top: 0;
+}
+.plabel-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 1px;
+}
+.pdiff-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.side-path {
+  flex-wrap: nowrap;
+}
+.side-path > .btn,
+.side-path > .seg-sm {
+  flex: none;
+}
+.side-path .path-text {
+  flex: 1 1 auto;
+}
+.side-path > .grow {
+  display: none;
+}
+
+.rel .ref {
+  flex: none;
+  white-space: nowrap;
+}
+/* passages: the margin rule carries a long passage; the tint stays calm */
+.pass-edit {
+  background: color-mix(in srgb, var(--focus) 62%, transparent);
+  box-shadow: none;
+}
+.pass-evidence {
+  background: color-mix(in srgb, var(--focus) 38%, transparent);
+}
+.pass-context {
+  background: color-mix(in srgb, var(--xref) 10%, transparent);
+}
+.side-path .path-text {
+  min-width: 64px;
+}
+.pass-long.pass-edit,
+.pass-long.pass-evidence {
+  background: color-mix(in srgb, var(--focus) 30%, transparent);
+}
+.wdiff .mk {
+  display: none;
+}
+
+/* ================================================================ 0003: rulings that lock in,
+   notes anywhere, passages in their own colour, two diff modes, the legend.
+   Theme tokens used here: --accent-passage (passage markers, rule, tint) and the
+   verdict tokens; "accept with changes" mixes accept toward amend, so a custom
+   theme needs no new token for it. */
+
+.v-accept-with-changes {
+  --vc: color-mix(in srgb, var(--accept) 62%, var(--amend));
+}
+
+/* passages: their own accent, apart from the headings and the theme accent */
+.pn {
+  color: var(--accent-passage);
+  background: color-mix(in srgb, var(--accent-passage) 14%, var(--surface));
+  border: 1.5px solid var(--accent-passage);
+  cursor: default;
+}
+button.pn {
+  cursor: pointer;
+}
+button.pn:hover {
+  background: color-mix(in srgb, var(--accent-passage) 28%, var(--surface));
+}
+.pn-evidence {
+  border-style: dotted;
+  border-width: 2px;
+}
+.pn-sm.pn-evidence {
+  border-width: 1.5px;
+}
+.stab-nums {
+  color: var(--accent-passage);
+}
+.pass-edit {
+  background: color-mix(in srgb, var(--accent-passage) 16%, transparent);
+}
+.pass-evidence {
+  background: color-mix(in srgb, var(--accent-passage) 9%, transparent);
+}
+.pass-long.pass-edit,
+.pass-long.pass-evidence {
+  background: color-mix(in srgb, var(--accent-passage) 7%, transparent);
+}
+.prose .pblk::after {
+  background: var(--accent-passage);
+}
+.prose .pblk-evidence::after {
+  background: repeating-linear-gradient(
+    to bottom,
+    var(--accent-passage) 0 3px,
+    transparent 3px 6px
+  );
+}
+.codeview .pblk {
+  box-shadow: inset 3px 0 0 var(--accent-passage);
+}
+.pdiff {
+  border-color: color-mix(in srgb, var(--accent-passage) 40%, var(--line));
+}
+@keyframes pass-flash {
+  0% {
+    background-color: color-mix(in srgb, var(--accent-passage) 38%, transparent);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+/* tooltips may run to several lines (a passage marker explains itself) */
+.tip {
+  white-space: pre-line;
+  max-width: 400px;
+}
+
+/* the two diff modes; both keep the source's own line breaks in the DOM (offsets
+   intact) and render a hard-wrap break as the space it is */
+.wdiff.inline,
+.wdiff.split {
+  white-space: normal;
+}
+.wdiff .brk {
+  display: block;
+}
+.wdiff .brk.para {
+  height: 0.55em;
+}
+.wdiff.split {
+  display: grid;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+}
+.dside {
+  padding: 10px 16px 12px;
+}
+.dside + .dside {
+  border-top: 1px dashed var(--line-2);
+}
+.d-before {
+  background: color-mix(in srgb, var(--del-bg) 30%, var(--surface));
+}
+.dlabel {
+  font-size: var(--fs-label);
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  margin-bottom: 2px;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.d-before .dlabel {
+  color: color-mix(in srgb, var(--decline) 70%, var(--muted));
+}
+.d-after .dlabel {
+  color: color-mix(in srgb, var(--accept) 70%, var(--muted));
+}
+.wdiff.split .w-del {
+  text-decoration: none;
+  border-radius: 2px;
+}
+.wdiff .w-ins,
+.wdiff .w-del,
+.after-view .w-ins,
+.after-view .w-del {
+  border-radius: 2px;
+  padding: 0 1px;
+}
+.after-view .w-del {
+  text-decoration: line-through;
+}
+.pdiff .wdiff.split {
+  border: 1px solid var(--line);
+  margin-top: 6px;
+}
+.pdiff .wdiff.split .dside {
+  padding: 8px 12px 10px;
+}
+/* the proposed wording in the pane is text a note can anchor to; its label is not */
+.pdiff .drun {
+  user-select: text;
+  -webkit-user-select: text;
+}
+.subhead-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  max-width: var(--measure);
+}
+.subhead-row .subhead {
+  margin-right: auto;
+}
+
+/* the ruling dock, bottom-anchored: its verdict row is always its last row */
+.center {
+  container-type: inline-size;
+}
+.ruling {
+  display: flex;
+  flex-direction: column;
+  max-height: none;
+  overflow: visible;
+  padding: 10px 32px 12px;
+}
+.ruling-top {
+  max-height: 34vh;
+  overflow: auto;
+  margin-bottom: 8px;
+}
+.ruling-hint {
+  font-size: var(--fs-small);
+  color: var(--ink-2);
+  line-height: 1.5;
+}
+.link-btn {
+  color: var(--xref);
+  font-size: var(--fs-small);
+}
+.link-btn:hover {
+  text-decoration: underline;
+}
+.ruling-head {
+  flex-wrap: nowrap;
+  margin: 0 auto 8px;
+  min-height: 28px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.ruling-state {
+  font-size: var(--fs-meta);
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ruling-state.rs-recorded {
+  color: var(--vc, var(--accept));
+  font-weight: 650;
+}
+.ruling-state.rs-open,
+.ruling-state.rs-unfinished {
+  color: var(--defer);
+  font-weight: 600;
+}
+.verdicts {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 6px;
+}
+.verdicts .vbtn {
+  min-height: 44px;
+  padding: 6px 6px;
+  font-size: 13.5px;
+  line-height: 1.2;
+  text-align: center;
+  gap: 6px;
+}
+.verdicts .vbtn .vb-label {
+  min-width: 0;
+}
+@container (max-width: 700px) {
+  .verdicts {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .ruling {
+    padding: 8px 14px 10px;
+  }
+}
+.ruling-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.rf-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.rf-head .vchip,
+.ruled-chip .vchip,
+.legend .vchip {
+  text-transform: none;
+}
+.rf-next {
+  font-size: var(--fs-small);
+  color: var(--ink-2);
+}
+.ruling-form .lbl {
+  margin: 4px 0 0;
+}
+.ruling-form .field {
+  margin: 0;
+}
+.rf-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.btn.record {
+  background: var(--vc);
+  border-color: var(--vc);
+  color: var(--surface);
+  font-weight: 650;
+}
+.btn.record kbd {
+  background: transparent;
+  color: inherit;
+  border-color: color-mix(in srgb, var(--surface) 50%, transparent);
+}
+.form-error {
+  color: var(--decline);
+  font-size: var(--fs-small);
+  font-weight: 600;
+}
+.ruled-chip {
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--vc, var(--line-2)) 45%, var(--line));
+  border-left: 4px solid var(--vc, var(--line-2));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--vc, var(--surface)) 7%, var(--surface));
+}
+.ruled-chip.unfinished {
+  border-left-color: var(--defer);
+  background: color-mix(in srgb, var(--defer) 8%, var(--surface));
+}
+.ruled-chip.decided {
+  --vc: var(--faint);
+  border-left-style: dashed;
+}
+.rc-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.vchip.solid {
+  background: var(--vc);
+  border-color: var(--vc);
+  color: var(--surface);
+  font-size: 13px;
+  padding: 2px 10px;
+}
+.chip-save {
+  font-size: var(--fs-meta);
+  color: var(--muted);
+}
+.chip-save.saved::before {
+  content: "✓ ";
+  color: var(--accept);
+}
+.chip-save.error {
+  color: var(--decline);
+  font-weight: 650;
+}
+.rc-words {
+  margin-top: 6px;
+  font-size: var(--fs-small);
+  color: var(--ink);
+  white-space: pre-wrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.rc-next {
+  margin-top: 4px;
+}
+@keyframes chip-in {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--vc) 55%, transparent);
+    transform: scale(0.985);
+  }
+  60% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--vc) 0%, transparent);
+    transform: scale(1);
+  }
+  100% {
+    box-shadow: none;
+  }
+}
+.ruled-chip.just {
+  animation: chip-in 0.9s ease-out;
+}
+.ruling.st-decided {
+  padding-top: 10px;
+}
+
+/* the queue: what is recorded, what is open or unfinished, what was decided before */
+.qi .dot[class*="v-"].ds-open,
+.qi .dot[class*="v-"].ds-unfinished {
+  background: transparent;
+  border-color: var(--defer);
+  border-style: dashed;
+}
+.qi .dot[class*="v-"].ds-decided {
+  background: transparent;
+  border-color: var(--faint);
+}
+.qi.qs-decided .qt {
+  color: var(--faint);
+}
+.vchip.unfinished {
+  color: var(--defer);
+  border-color: color-mix(in srgb, var(--defer) 50%, transparent);
+  border-style: dashed;
+}
+.vchip.faint {
+  opacity: 0.6;
+}
+.srow.unfinished {
+  border-color: color-mix(in srgb, var(--defer) 50%, var(--line));
+}
+.callout.decided-note {
+  border-left: 3px dashed var(--faint);
+}
+.ask-decided {
+  cursor: default;
+  opacity: 0.8;
+}
+
+/* a selection that cannot take a note says why */
+.toolbar.why {
+  max-width: 420px;
+  padding: 8px 12px;
+  color: var(--bg);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+/* agent-written text a note can anchor to */
+.field-text .hl,
+.anno .hl {
+  cursor: pointer;
+}
+
+/* header controls */
+.help-btn {
+  min-width: 28px;
+  justify-content: center;
+  font-weight: 700;
+}
+
+/* the legend: home page in full, the ? overlay compact */
+.legend {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px 28px;
+  margin-top: var(--sp-3);
+}
+.legend.compact {
+  gap: 14px 24px;
+}
+.lg-sec:last-child {
+  grid-column: 1 / -1;
+}
+.lg-title {
+  margin: 0 0 6px;
+  font-size: var(--fs-label);
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--heading);
+}
+.lg-row {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  padding: 3px 0;
+  font-size: var(--fs-small);
+  line-height: 1.45;
+  color: var(--ink-2);
+}
+.legend.compact .lg-row {
+  grid-template-columns: 132px minmax(0, 1fr);
+  font-size: 13px;
+}
+.lg-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.lg-steps {
+  margin: 0;
+  padding-left: 18px;
+  font-size: var(--fs-small);
+  color: var(--ink-2);
+  line-height: 1.5;
+}
+.vbtn-sample {
+  font-size: 12px;
+  padding: 1px 8px;
+  border: 1.5px dashed var(--accept);
+  border-radius: 6px;
+  color: var(--accept);
+}
+.swatch-pass {
+  padding: 0 6px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--accent-passage) 16%, transparent);
+  box-shadow: inset 3px 0 0 var(--accent-passage);
+  font-size: 12px;
+}
+.xref-sample {
+  color: var(--xref);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.lg-hl {
+  display: inline-block;
+  width: 14px;
+  height: 12px;
+  border-radius: 2px;
+}
+.legend .keys {
+  font-size: 13px;
+}
+.legend-box {
+  width: min(980px, 94vw);
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.legend-scroll {
+  overflow: auto;
+}
+.modal.legend-modal {
+  padding-top: 6vh;
+}
+@media (max-width: 760px) {
+  .legend {
+    grid-template-columns: 1fr;
+  }
+}
+.ruling > * {
+  width: 100%;
+}
+.ruling-hint .link-btn {
+  margin-left: 6px;
+}
+.legend:not(.compact) {
+  grid-template-columns: 1fr;
+}
+.legend:not(.compact) .lg-row {
+  grid-template-columns: 210px minmax(0, 1fr);
+}
+.w-del + .w-ins,
+.w-ins + .w-del {
+  margin-left: 3px;
+}
+.legend.compact .lg-row {
+  grid-template-columns: 168px minmax(0, 1fr);
+}
+.qmeta {
+  flex-wrap: wrap;
+}
+/* a quoted passage under What wears the passage colour, like its number */
+.excerpt .focus {
+  background: color-mix(in srgb, var(--accent-passage) 13%, transparent);
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--accent-passage) 60%, transparent);
+}
+@media (max-width: 1180px) {
+  .theme-btn .tname {
+    display: none;
+  }
+}
+.quoted .excerpt {
+  border-left-color: var(--accent-passage);
 }

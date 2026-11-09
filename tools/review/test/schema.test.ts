@@ -1,8 +1,14 @@
 import { describe, expect, test } from 'bun:test';
 import {
   type Annotation,
+  advise,
+  boundaryCut,
+  collisions,
+  draftQuestion,
   type Item,
+  type Packet,
   toDecisions,
+  upgradeVerdicts,
   validateDecisions,
   validateDraft,
   validatePacket,
@@ -14,7 +20,90 @@ import { branchPacket, packet, SLICE, state } from './fixtures.ts';
 const PACKET_CASES: [string, (p: Record<string, unknown>) => void, string[]][] = [
   ['the fixture is valid', () => {}, []],
   ['wrong kind', (p) => (p.kind = 'other'), ['kind']],
-  ['future version refused', (p) => (p.version = 2), ['version']],
+  ['future version refused', (p) => (p.version = 3), ['version']],
+  ['a version 1 packet is refused', (p) => (p.version = 1), ['version']],
+  [
+    'every item asks a question',
+    (p) => delete (p.items as { question?: string }[])[0]!.question,
+    ['items[0].question'],
+  ],
+  [
+    'the question is not empty',
+    (p) => ((p.items as { question: string }[])[0]!.question = ' '),
+    ['items[0].question'],
+  ],
+  [
+    'version 1 analysis is named, with where it went',
+    (p) => ((p.items as { analysis?: object }[])[0]!.analysis = { summary: 'x' }),
+    ['items[0].analysis'],
+  ],
+  [
+    'version 1 proposal is named, with where it went',
+    (p) => ((p.items as { proposal?: object }[])[0]!.proposal = { edits: [] }),
+    ['items[0].proposal'],
+  ],
+  [
+    'what needs its facts',
+    (p) => ((p.items as { what: object }[])[0]!.what = {}),
+    ['items[0].what.facts'],
+  ],
+  [
+    'so what needs its stakes',
+    (p) => ((p.items as { soWhat: object }[])[0]!.soWhat = { stakes: '' }),
+    ['items[0].soWhat.stakes'],
+  ],
+  [
+    'a context file says why it is shown',
+    (p) => ((p.items as { context?: object[] }[])[0]!.context = [{ path: SLICE }]),
+    ['items[0].context[0].why'],
+  ],
+  [
+    'a version 1 context note is pointed at why',
+    (p) => ((p.items as { context?: object[] }[])[0]!.context = [{ path: SLICE, note: 'n' }]),
+    ['items[0].context[0].why'],
+  ],
+  [
+    'a ruled item names who, when, and the ruling',
+    (p) =>
+      ((p.items as { ruled: object }[])[1]!.ruled = { by: 'Rae', on: 'yesterday', ruling: '' }),
+    ['items[1].ruled.on', 'items[1].ruled.ruling'],
+  ],
+  [
+    'attention is valid in main mode',
+    (p) => ((p.items as { attention?: string }[])[0]!.attention = 'routine'),
+    [],
+  ],
+  [
+    'attention is closed',
+    (p) => ((p.items as { attention?: string }[])[0]!.attention = 'urgent'),
+    ['items[0].attention'],
+  ],
+  [
+    'changes belong to a branch review',
+    (p) =>
+      ((p.items as { changes?: object[] }[])[0]!.changes = [
+        { path: SLICE, status: 'modified', patch: '' },
+      ]),
+    ['items[0].changes'],
+  ],
+  [
+    'a change belongs to a branch review',
+    (p) => (p.change = { base: { ref: 'a', sha: 'b' }, head: { ref: 'c', sha: 'd' } }),
+    ['change'],
+  ],
+  [
+    'members are strings',
+    (p) => ((p.items as { members?: unknown[] }[])[0]!.members = ['a', 3]),
+    ['items[0].members[1]'],
+  ],
+  [
+    'a composed edit names other items that exist',
+    (p) =>
+      ((p.items as { nowWhat: { composed?: object[] } }[])[0]!.nowWhat.composed = [
+        { with: ['0001-x/IF-001', 'nope'], edits: [] },
+      ]),
+    ['items[0].nowWhat.composed[0].with[0]', 'items[0].nowWhat.composed[0].with[1]'],
+  ],
   ['empty title', (p) => (p.title = ' '), ['title']],
   ['missing repo name', (p) => (p.repo = {}), ['repo.name']],
   ['iteration must be >= 1', (p) => (p.iteration = 0), ['iteration']],
@@ -64,32 +153,33 @@ const PACKET_CASES: [string, (p: Record<string, unknown>) => void, string[]][] =
   [
     'edit path not in files',
     (p) =>
-      ((p.items as { proposal: { edits: { path: string }[] } }[])[0]!.proposal.edits[0]!.path =
+      ((p.items as { nowWhat: { edits: { path: string }[] } }[])[0]!.nowWhat.edits[0]!.path =
         'x.md'),
-    ['items[0].proposal.edits[0].path'],
+    ['items[0].nowWhat.edits[0].path'],
   ],
   [
     'edit needs before text',
     (p) =>
-      ((p.items as { proposal: { edits: { before: string }[] } }[])[0]!.proposal.edits[0]!.before =
+      ((p.items as { nowWhat: { edits: { before: string }[] } }[])[0]!.nowWhat.edits[0]!.before =
         ''),
-    ['items[0].proposal.edits[0].before'],
+    ['items[0].nowWhat.edits[0].before'],
   ],
   [
     'recommendation verdict closed',
     (p) =>
       ((
-        p.items as { analysis: { recommendation: { verdict: string } } }[]
-      )[0]!.analysis.recommendation.verdict = 'maybe'),
-    ['items[0].analysis.recommendation.verdict'],
+        p.items as { nowWhat: { recommendation: { verdict: string } } }[]
+      )[0]!.nowWhat.recommendation.verdict = 'maybe'),
+    ['items[0].nowWhat.recommendation.verdict'],
   ],
   [
     'relation to an unknown item',
     (p) =>
-      ((p.items as { analysis: object }[])[0]!.analysis = {
+      ((p.items as { soWhat: object }[])[0]!.soWhat = {
+        stakes: 's',
         relations: [{ item: 'SF-999', note: 'x' }],
       }),
-    ['items[0].analysis.relations[0].item'],
+    ['items[0].soWhat.relations[0].item'],
   ],
   [
     'duplicate section key',
@@ -142,9 +232,10 @@ const PACKET_CASES: [string, (p: Record<string, unknown>) => void, string[]][] =
   [
     'a change item may omit status',
     (p) =>
-      (p.items as object[]).push({
+      inBranch(p).push({
         id: 'c',
         kind: 'decision',
+        question: 'Approve?',
         title: 't',
         source: { path: 'd', line: 1 },
         evidence: [],
@@ -156,9 +247,10 @@ const PACKET_CASES: [string, (p: Record<string, unknown>) => void, string[]][] =
   [
     'change status is closed',
     (p) =>
-      (p.items as object[]).push({
+      inBranch(p).push({
         id: 'c',
         kind: 'decision',
+        question: 'Approve?',
         title: 't',
         source: { path: 'd', line: 1 },
         evidence: [],
@@ -167,12 +259,14 @@ const PACKET_CASES: [string, (p: Record<string, unknown>) => void, string[]][] =
       }),
     ['items[2].changes[0].status'],
   ],
-  [
-    'attention is closed',
-    (p) => ((p.items as { attention?: string }[])[0]!.attention = 'urgent'),
-    ['items[0].attention'],
-  ],
 ];
+
+/** Turn the main-mode fixture into a branch review, returning its items to push to. */
+function inBranch(p: Record<string, unknown>): object[] {
+  p.mode = 'branch';
+  p.change = { base: { ref: 'main', sha: 'b' }, head: { ref: 'topic', sha: 'h' } };
+  return p.items as object[];
+}
 
 const REF = {
   title: 'Fixture review',
@@ -288,6 +382,69 @@ const SUBMIT_CASES: [string, Record<string, unknown>, string[]][] = [
     [],
   ],
   ['duplicate annotation id', state({ annotations: [ann(), ann()] }), ['annotations[1].id']],
+  // decisions version 2: accept with changes, one box per verdict, notes on agent text
+  [
+    'accept with changes needs its instructions',
+    state({ verdicts: [{ item: '0001-x/IF-001', verdict: 'accept-with-changes' }] }),
+    ['verdicts[0].instructions'],
+  ],
+  [
+    'accept with changes, instructed',
+    state({
+      verdicts: [
+        {
+          item: '0001-x/IF-001',
+          verdict: 'accept-with-changes',
+          instructions: 'say what hygiene means',
+        },
+      ],
+    }),
+    [],
+  ],
+  [
+    'accept may carry a note',
+    state({ verdicts: [{ item: '0001-x/IF-001', verdict: 'accept', note: 'keep it short' }] }),
+    [],
+  ],
+  [
+    'a verdict carries only its own box',
+    state({
+      verdicts: [{ item: '0001-x/IF-001', verdict: 'amend', wording: 'new', note: 'also this' }],
+    }),
+    ['verdicts[0].note'],
+  ],
+  [
+    'a note on agent-written text',
+    state({
+      annotations: [ann({ target: { kind: 'field', item: '0001-x/IF-001', field: 'what.facts' } })],
+    }),
+    [],
+  ],
+  [
+    'a note on an edit’s proposed wording',
+    state({
+      annotations: [
+        ann({ target: { kind: 'field', item: '0001-x/IF-001', field: 'nowWhat.edits[0].after' } }),
+      ],
+    }),
+    [],
+  ],
+  [
+    'a field must name text in the item',
+    state({
+      annotations: [
+        ann({ target: { kind: 'field', item: '0001-x/IF-001', field: 'nowWhat.edits[3].after' } }),
+      ],
+    }),
+    ['annotations[0].target.field'],
+  ],
+  [
+    'a field path names text, not an object',
+    state({
+      annotations: [ann({ target: { kind: 'field', item: '0001-x/IF-001', field: 'what' } })],
+    }),
+    ['annotations[0].target.field'],
+  ],
 ];
 
 describe('validatePacket', () => {
@@ -303,6 +460,61 @@ describe('validateSubmission (strict, against the packet)', () => {
   test.each(SUBMIT_CASES)('%s', (_name, s, paths) => {
     const r = validateSubmission(s, packet());
     expect(r.ok ? [] : r.errors.map((e) => e.path)).toEqual(paths);
+  });
+  test('an item decided in an earlier pass is not ruled again', () => {
+    const p = packet();
+    (p.items[0] as Item).decided = { verdict: 'accept', by: 'Rae', on: '2026-11-08', pass: 1 };
+    expect(validatePacket(p).ok).toBe(true);
+    const r = validateSubmission(
+      state({ verdicts: [{ item: '0001-x/IF-001', verdict: 'accept' }] }),
+      p,
+    );
+    expect(r.ok ? [] : r.errors.map((e) => e.path)).toEqual(['verdicts[0].item']);
+  });
+});
+
+describe('decisions version 1 is still read, under its own rules', () => {
+  const v1 = (verdicts: unknown[], annotations: unknown[] = []) => ({
+    kind: 'intent-review-decisions',
+    version: 1,
+    packet: REF,
+    reviewer: 'Rae',
+    submittedAt: '2026-11-07T01:00:00.000Z',
+    verdicts,
+    annotations,
+  });
+  test('a note beside any verdict is fine in version 1', () => {
+    const d = v1([{ item: 'x', verdict: 'amend', wording: 'w', note: 'n' }]);
+    expect(validateDecisions(d).ok).toBe(true);
+  });
+  test('version 1 knows neither accept-with-changes nor field targets', () => {
+    const d = v1(
+      [{ item: 'x', verdict: 'accept-with-changes', instructions: 'i' }],
+      [
+        {
+          ...ann({ target: { kind: 'field', item: 'x', field: 'what.facts' } }),
+        },
+      ],
+    );
+    const r = validateDecisions(d);
+    expect(r.ok ? [] : r.errors.map((e) => e.path)).toEqual([
+      'verdicts[0].verdict',
+      'annotations[0].target.kind',
+    ]);
+  });
+  test('a version 1 draft’s note joins its verdict’s one box', () => {
+    expect(
+      upgradeVerdicts([
+        { item: 'x', verdict: 'revise', request: 'rework it', note: 'and this' },
+        { item: 'y', verdict: 'accept', note: 'kept' },
+      ]),
+    ).toEqual([
+      { item: 'x', verdict: 'revise', request: 'rework it\n\nand this' },
+      { item: 'y', verdict: 'accept', note: 'kept' },
+    ]);
+  });
+  test('the page writes version 2', () => {
+    expect(toDecisions(state(), REF, '2026-11-07T01:00:00.000Z').version).toBe(2);
   });
 });
 
@@ -366,7 +578,8 @@ describe('drafts and decisions', () => {
     expect('comment' in d).toBe(false);
     expect(d.verdicts).toEqual([
       { item: '0001-x/IF-001', verdict: 'decline', why: 'no' },
-      { item: '0001-x/IF-002', verdict: 'defer', ruling: 'shared by design', note: 'later' },
+      // version 2: one box per verdict — a defer carries its ruling, not a note beside it
+      { item: '0001-x/IF-002', verdict: 'defer', ruling: 'shared by design' },
     ]);
     expect(Object.keys(d.annotations[0] as object).sort()).toEqual([
       'at',
@@ -403,4 +616,123 @@ test('kind "sf" — the spelling before intent feedback — is accepted, and sti
   const { status: _drop, ...noStatus } = legacy;
   const r = validatePacket({ ...p, items: [noStatus] });
   expect(r.ok ? [] : r.errors.map((e) => e.path)).toEqual(['items[0].status']);
+});
+
+describe('version 1 → 2', () => {
+  test('a version 1 packet is refused with how to migrate it', () => {
+    const r = validatePacket({ ...packet(), version: 1 });
+    expect(r.ok).toBe(false);
+    const msg = r.ok ? '' : (r.errors[0]?.message ?? '');
+    expect(msg).toContain('version 1 packet');
+    for (const field of [
+      'question',
+      'what.facts',
+      'soWhat.stakes',
+      'nowWhat.edits',
+      'context[].why',
+    ]) {
+      expect(msg).toContain(field);
+    }
+  });
+});
+
+describe('advise: what a valid packet still lacks', () => {
+  const messages = (p: Packet) => advise(p).map((a) => `${a.path}: ${a.message}`);
+
+  test('the fixture needs no advice beyond the ruled item it leaves bare', () => {
+    expect(messages(packet())).toEqual([
+      expect.stringContaining('items[1]: 0001-x/IF-002: no what / soWhat / nowWhat yet'),
+    ]);
+  });
+
+  test('a scanner-drafted question, a statement, and a ruled Status without its block', () => {
+    const p = packet();
+    const [a, b] = p.items as [Item, Item];
+    a.question = draftQuestion(a);
+    b.question = 'Land the wording.';
+    delete b.ruled;
+    const m = messages(p);
+    expect(m).toContainEqual(
+      expect.stringContaining(
+        "items[0].question: 0001-x/IF-001: the question is still the scanner's draft",
+      ),
+    );
+    expect(m).toContainEqual(
+      expect.stringContaining(
+        'items[1].question: 0001-x/IF-002: phrase the question as a question',
+      ),
+    );
+    expect(m).toContainEqual(expect.stringContaining('items[1].ruled'));
+  });
+
+  test('an edit promised in prose, not written as an edit, is named', () => {
+    const p = packet();
+    const a = p.items[0] as Item;
+    (a.nowWhat as NonNullable<Item['nowWhat']>).summary =
+      'Name both acts; the agent makes that consequential edit to the glossary too.';
+    expect(messages(p)).toContainEqual(expect.stringContaining('items[0].nowWhat.summary'));
+    (a.nowWhat as NonNullable<Item['nowWhat']>).summary = 'Name both acts, as the edit shows.';
+    expect(messages(p).some((m) => m.includes('nowWhat.summary'))).toBe(false);
+  });
+
+  test('an insertion after a "before" that stops mid-sentence is named', () => {
+    const text = '- **Map a reference** back to a live session for resume, and re-create it.\n';
+    expect(
+      boundaryCut(text, {
+        path: 'x',
+        before: '- **Map a reference** back',
+        after: '- **Map a reference** back (verified)',
+      }),
+    ).toContain('stops mid-sentence');
+    expect(
+      boundaryCut(text, {
+        path: 'x',
+        before: 'and re-create it.',
+        after: 'and re-create it. New.',
+      }),
+    ).toBeNull();
+    expect(boundaryCut(text, { path: 'x', before: 'ap a reference', after: 'x' })).toContain(
+      'inside a word',
+    );
+    expect(boundaryCut(text, { path: 'x', before: 'for resume', after: 'to attach' })).toBeNull();
+  });
+
+  test('an item decided in an earlier pass gets no advice', () => {
+    const p = packet();
+    const b = p.items[1] as Item;
+    b.decided = { verdict: 'accept', by: 'Rae', on: '2026-11-08' };
+    expect(messages(p)).toEqual([]);
+  });
+
+  test('a quote or "before" not verbatim, or ambiguous, is named', () => {
+    const p = packet();
+    const a = p.items[0] as Item;
+    a.evidence = [{ path: SLICE, quote: 'for resume and re-create' }];
+    (a.nowWhat?.edits ?? [])[0]!.before = '**';
+    const m = messages(p);
+    expect(m).toContainEqual(
+      expect.stringContaining('evidence[0].quote: the quote is not verbatim'),
+    );
+    expect(m).toContainEqual(expect.stringContaining('"before" occurs more than once'));
+  });
+
+  test('a one-sided recommendation is flagged', () => {
+    const p = packet();
+    delete (p.items[0] as Item).nowWhat?.ifDeclined;
+    expect(messages(p)).toContainEqual(expect.stringContaining('reads one-sided'));
+  });
+
+  test('two items editing one passage collide until one declares a composed wording', () => {
+    const p = packet();
+    const b = p.items[1] as Item;
+    b.nowWhat = {
+      edits: [{ path: SLICE, before: 'back to a live session for resume', after: 'x' }],
+    };
+    expect(collisions(p)).toEqual([
+      { a: '0001-x/IF-001', b: '0001-x/IF-002', path: SLICE, aEdit: 0, bEdit: 0 },
+    ]);
+    expect(messages(p)).toContainEqual(expect.stringContaining('edit overlapping text'));
+    b.nowWhat.composed = [{ with: ['0001-x/IF-001'], edits: [] }];
+    expect(messages(p).some((m) => m.includes('overlapping'))).toBe(false);
+  });
 });

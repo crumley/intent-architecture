@@ -364,19 +364,22 @@ When the human wants to work through what needs their judgment — "review the o
 to install; `<skill-dir>` is this skill's directory). The loop:
 
 1. **Prepare** a packet: `scan` drafts it from the repository — open items on the main line, or a
-   branch against its base — and you add what only you can write: exact quotes, each proposed
-   revision as an edit, and a fair analysis with a recommendation per item. `validate` it.
+   branch against its base — and you add what only you can write: for each item, the one question it
+   asks the human, then **What** (the facts and the exact passages, no advocacy), **So what** (why
+   it matters), and **Now what** (each proposed revision as an edit, what each choice leads to, and
+   your recommendation, last). `validate` it and work through its advice.
 2. **Run** `serve` in the background, give the human the URL it prints, and wait for it to exit. The
-   human rules on each item (accept, amend, decline, defer, revise), annotates any file, and
-   submits.
+   human rules on each item (accept, accept with changes, amend, revise, decline, defer), annotates
+   any file or the agent's own text, and submits.
 3. **Carry out** the decisions: intent edits in their own change, never bundled with design or build
    work; each intent-feedback item's Status line updated (ruled-and-awaiting until the intent change
    merges, then adjudicated; or declined with the human's why); every note acted on; a branch's
    overall verdict honoured.
 4. **Iterate** with a smaller packet until nothing comes back.
 
-The full procedure — producers, packet fields, the Status wording for every outcome, and what each
-kind of note asks of you — is in `references/review.md`.
+The full procedure — producers, how to write each stage, the Status wording for every outcome, and
+what each kind of note asks of you — is in `references/review.md`; every field of the packet and
+decisions is in `references/review-contract.md`.
 
 ---
 

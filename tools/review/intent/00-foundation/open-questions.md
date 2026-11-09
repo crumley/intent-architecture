@@ -17,6 +17,12 @@
 - **Boundary drift watch.** As `design/` fills in, watch for build choices (the schema field names,
   the keys, the bundle) creeping into `intent/`, and for durable constraints stranded in `design/`.
 
+- **The tool's own home and name.** The tool is becoming a general surface for reviewing a change
+  with an agent, with the intent architecture as one producer; it is to be named Markup and move to
+  its own repository. What stays in this skill, and what the contract owes producers other than the
+  intent architecture, is open — the current line between the two is drawn in
+  [`../../design/0002-review-format-v2/`](../../design/0002-review-format-v2/README.md).
+
 ## Index of per-slice open questions
 
 - [`01-concepts/00-review-loop.md`](../01-concepts/00-review-loop.md) — more than one reviewer

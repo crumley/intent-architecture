@@ -12,11 +12,10 @@ enough context to be ruled on directly.
 Each intent-feedback item: a stable id (`IF-NNN`, unique within this entry, always written with its
 number — cite `IF-001`, never the prefix alone), the intent slice + section, the friction, the
 **assumption** made to keep moving, and a concrete **proposed revision** for human review. `intent/`
-is never silently rewritten. An intent-feedback item is `pending` until settled (no line needed);
-once settled, **append** a disposition line —
-`adjudicated — <link to the intent change that
-settled it>` or `declined — <one-line why>` — never
-rewriting the original text.
+is never silently rewritten. An intent-feedback item carries an explicit `**Status:** pending` line
+from the moment it is raised (so the grep in the design README finds it); once settled, the Status
+line records the disposition — `adjudicated — <link to the intent change that settled it>` or
+`declined — <one-line why>` — never rewriting the original text.
 
 ## IF-001 — <the friction, in one line>
 
@@ -24,3 +23,4 @@ rewriting the original text.
 - **Friction:** <what building showed the slice does not say, or says wrongly>.
 - **Assumption made to keep moving:** <what the build did meanwhile>.
 - **Proposed revision:** <the concrete intent edit, for human review>.
+- **Status:** pending.

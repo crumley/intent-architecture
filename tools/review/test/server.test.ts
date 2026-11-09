@@ -188,6 +188,13 @@ describe('themes and preferences', () => {
     expect(JSON.parse(readFileSync(prefsPath, 'utf8'))).toEqual({ theme: 'neutral-dark' });
     expect((await api(s, 'GET', '/api/themes')).body.prefs).toEqual({ theme: 'neutral-dark' });
     expect((await api(s, 'PUT', '/api/prefs', { theme: 'x;y' })).status).toBe(400);
+    // the diff display is remembered beside the theme
+    expect((await api(s, 'PUT', '/api/prefs', { diff: 'split' })).status).toBe(200);
+    expect(JSON.parse(readFileSync(prefsPath, 'utf8'))).toEqual({
+      theme: 'neutral-dark',
+      diff: 'split',
+    });
+    expect((await api(s, 'PUT', '/api/prefs', { diff: 'sideways' })).status).toBe(400);
   });
 });
 
