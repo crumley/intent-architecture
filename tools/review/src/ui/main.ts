@@ -6,6 +6,7 @@
 
 import { createSelector, lineOf, locate } from '../anchor.ts';
 import { diffWords } from '../diff.ts';
+import { fieldLabel, fieldText } from '../fields.ts';
 import {
   type Annotation,
   type AnnotationKind,
@@ -19,14 +20,26 @@ import {
   OVERALL,
   type OverallKind,
   type Packet,
-  REQUIRED_WORDS,
   type Ref,
   type ReviewState,
+  requiredWords,
+  upgradeVerdicts,
   type ValidationError,
+  VERDICT_WORDS,
   type Verdict,
   type VerdictKind,
 } from '../schema.ts';
 import { DEFAULT_DARK, DEFAULT_LIGHT, THEMES, type Theme, themeCss } from '../themes.ts';
+import {
+  afterEdits,
+  type Composite,
+  inlineDiff,
+  mapRange,
+  rangesFor,
+  splitDiff,
+  targetKey,
+  targetsOf,
+} from './composite.ts';
 import { highlightLine, type Lang, langOf } from './highlight.ts';
 import {
   type Group,
@@ -87,7 +100,21 @@ type State = {
   customThemes: Theme[];
   themeDir: string | null;
   folds: Record<string, boolean>;
+  /** How an edit is shown: one inline run (strike + insert) or before and after blocks. */
+  diff: DiffMode;
+  /** The item whose ruling form is open; a ruling not open is recorded (or unfinished). */
+  editing: string | null;
+  /** The ruling as recorded before the form opened, restored if the edit is cancelled. */
+  editingFrom: Verdict | null;
+  /** Why the open ruling could not be recorded yet (missing words). */
+  formError: string | null;
+  /** The item whose ruling was just recorded: its chip plays the confirmation once. */
+  justRecorded: string | null;
+  /** Agent-written text to scroll to and flash once (a note jumped to). */
+  jump: { item: string; field: string } | null;
 };
+
+type DiffMode = 'inline' | 'split';
 
 const token = new URLSearchParams(location.search).get('token') ?? '';
 const root = document.getElementById('app') as HTMLElement;
@@ -172,6 +199,17 @@ function paintChrome(): void {
   }
   const n = document.getElementById('session-count');
   if (n) n.textContent = String(S.review.verdicts.length + S.review.annotations.length);
+  // The recorded ruling says whether it has reached the draft on disk yet.
+  const chip = document.getElementById('chip-save');
+  if (chip) {
+    chip.textContent = {
+      idle: 'in this review',
+      saving: 'saving to your draft…',
+      saved: 'saved to your draft',
+      error: 'NOT saved — the review server did not answer',
+    }[S.saved];
+    chip.className = `chip-save ${S.saved}`;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -182,6 +220,26 @@ const currentItem = (): Item | undefined => items()[S.current];
 const fileText = (path: string) => FILES.get(path);
 const verdictOf = (id: string) => S.review.verdicts.find((v) => v.item === id);
 const itemById = (id: string) => items().find((i) => i.id === id);
+/** Items the human rules on this pass: everything but what an earlier pass decided. */
+const toRule = () => items().filter((i) => !i.decided);
+
+type RulingState = 'none' | 'open' | 'recorded' | 'unfinished';
+/**
+ * Where an item's ruling stands. Open: its form is up. Recorded: chosen, with every
+ * word it needs, and closed — what the agent will receive. Unfinished: chosen but
+ * missing the words it needs; it is kept in the draft but cannot be submitted.
+ */
+function rulingState(id: string): RulingState {
+  const v = verdictOf(id);
+  if (!v) return 'none';
+  if (S.editing === id) return 'open';
+  return isComplete(v) ? 'recorded' : 'unfinished';
+}
+function isComplete(v: Verdict): boolean {
+  const need = requiredWords(v.verdict);
+  return !need || Boolean(v[need]?.trim());
+}
+const recordedCount = () => toRule().filter((i) => rulingState(i.id) === 'recorded').length;
 
 const KIND_LABEL: Record<string, string> = {
   if: 'Intent feedback',
@@ -197,17 +255,6 @@ const isChange = (it: Item) =>
   it.kind === 'intent-change' || it.kind === 'design-entry' || it.kind === 'decision';
 const capitalize = (w: string) => w.charAt(0).toUpperCase() + w.slice(1);
 
-/**
- * On a change under review, accept and decline read as approve and reject; on an
- * item already ruled, accept reads as confirm (the wording lands the ruling).
- */
-function verdictLabel(it: Item, v: VerdictKind): string {
-  if (it.ruled && v === 'accept') return 'confirm';
-  if (isChange(it) && v === 'accept') return 'approve';
-  if (isChange(it) && v === 'decline') return 'reject';
-  return v;
-}
-
 function shortId(id: string): string {
   const m = /^(\d{4})-[^/]*\/[IS]F-(\d+)$/.exec(id);
   if (m) return `${m[1]} IF-${m[2]}`;
@@ -219,16 +266,32 @@ function shortId(id: string): string {
   return id.length > 40 ? `…${id.slice(-38)}` : id;
 }
 
+/** Words typed into a verdict's box, by item and box, kept across verdict switches. */
+const STASH = new Map<string, string>();
+
 function setVerdict(id: string, verdict: VerdictKind | null): void {
   const i = S.review.verdicts.findIndex((v) => v.item === id);
   if (verdict === null) {
     if (i !== -1) S.review.verdicts.splice(i, 1);
+    if (S.editing === id) S.editing = null;
   } else {
-    const next: Verdict = { ...(i === -1 ? {} : S.review.verdicts[i]), item: id, verdict };
-    if (verdict === 'amend' && !next.wording) next.wording = amendSeed(id);
+    const prev = S.review.verdicts[i];
+    const next: Verdict = { item: id, verdict };
+    const field = VERDICT_WORDS[verdict].field;
+    // Switching verdicts never loses what was typed: it is kept per box, and carried
+    // into the new verdict's box when that one is empty (amend starts from the proposal).
+    const prevField = prev ? VERDICT_WORDS[prev.verdict].field : null;
+    const typed = prev && prevField ? prev[prevField] : undefined;
+    if (prevField && typed?.trim()) STASH.set(`${id}:${prevField}`, typed);
+    const kept = STASH.get(`${id}:${field}`);
+    if (prevField === field) next[field] = typed ?? '';
+    else if (kept !== undefined) next[field] = kept;
+    else if (field === 'wording') next.wording = amendSeed(id);
+    else if (typed?.trim()) next[field] = typed;
     if (i === -1) S.review.verdicts.push(next);
     else S.review.verdicts[i] = next;
   }
+  S.formError = null;
   changed();
 }
 
@@ -241,19 +304,19 @@ function amendSeed(id: string): string {
 
 function targetText(t: AnnotationTarget): string | undefined {
   if (t.kind === 'file') return fileText(t.path);
-  return itemById(t.item)?.sections.find((s) => s.key === t.section)?.text;
+  const it = itemById(t.item);
+  if (!it) return undefined;
+  if (t.kind === 'field') return fieldText(it, t.field);
+  return it.sections.find((s) => s.key === t.section)?.text;
 }
 
-const sameTarget = (a: AnnotationTarget, b: AnnotationTarget) =>
-  a.kind === 'file'
-    ? b.kind === 'file' && a.path === b.path
-    : b.kind === 'item' && a.item === b.item && a.section === b.section;
+const sameTarget = (a: AnnotationTarget, b: AnnotationTarget) => targetKey(a) === targetKey(b);
 
 const annotationsOn = (t: AnnotationTarget) =>
   S.review.annotations.filter((a) => sameTarget(a.target, t));
 const annotationsForItem = (id: string) =>
   S.review.annotations.filter(
-    (a) => (a.target.kind === 'item' && a.target.item === id) || a.item === id,
+    (a) => (a.target.kind !== 'file' && a.target.item === id) || a.item === id,
   );
 const annotationsInFile = (path: string) =>
   S.review.annotations.filter((a) => a.target.kind === 'file' && a.target.path === path);
@@ -272,9 +335,10 @@ function marksFor(t: AnnotationTarget, text: string): Range[] {
 function targetLabel(a: Annotation): string {
   const t = a.target;
   if (t.kind === 'file') return `${t.path}${a.at ? `:${a.at.line}` : ''}`;
+  if (t.kind === 'field') return `${shortId(t.item)} · ${fieldLabel(t.field)}`;
   const it = itemById(t.item);
   const label = it?.sections.find((s) => s.key === t.section)?.label ?? t.section;
-  return `${shortId(t.item)} · ${label}`;
+  return `${shortId(t.item)} · as written · ${label}`;
 }
 
 /** Offsets of a ref's target inside its file: the quote, else the line range. */
@@ -380,16 +444,54 @@ const itemCtx = (it: Item | undefined): RefContext => {
   return c;
 };
 
+/**
+ * Mark an element as a place notes can anchor: a file, an item's section, a field of
+ * agent-written text, or a composite view (a diff, a file after edits) whose pieces
+ * each know their source. Selection maps through the innermost such host.
+ */
 function annotatable(el: HTMLElement, t: AnnotationTarget | null | undefined): HTMLElement {
   if (!t) return el;
   el.classList.add('anno');
   el.dataset.kind = t.kind;
   if (t.kind === 'file') el.dataset.path = t.path;
-  else {
+  else if (t.kind === 'item') {
     el.dataset.item = t.item;
     el.dataset.section = t.section;
+  } else {
+    el.dataset.item = t.item;
+    el.dataset.field = t.field;
   }
   return el;
+}
+
+/** Composite views rendered this pass, by id: how their offsets map to anchor targets. */
+const COMPOSITES = new Map<string, Composite>();
+let compositeSeq = 0;
+function compositeHost(el: HTMLElement, c: Composite): HTMLElement {
+  if (!targetsOf(c).length) return el;
+  const id = `c${++compositeSeq}`;
+  COMPOSITES.set(id, c);
+  el.classList.add('anno');
+  el.dataset.kind = 'composite';
+  el.dataset.cid = id;
+  return el;
+}
+
+/** Existing notes on any of a composite's sources, as ranges in the composite's own text. */
+function compositeMarks(c: Composite): Range[] {
+  const out: Range[] = [];
+  for (const t of targetsOf(c)) {
+    const text = targetText(t);
+    if (text === undefined) continue;
+    for (const a of annotationsOn(t)) {
+      const at = locate(text, a.selector, a.at?.start);
+      if (at.status === 'orphaned') continue;
+      for (const r of rangesFor(c, t, at.start, at.end)) {
+        out.push({ ...r, cls: `hl hl-${a.kind}`, id: a.id });
+      }
+    }
+  }
+  return out;
 }
 
 function proseView(text: string, o: ViewOpts = {}): HTMLElement {
@@ -491,42 +593,129 @@ function itemText(it: Item, key: string, text: string): HTMLElement {
   });
 }
 
-/** Agent-written prose (analysis, summaries): read-only, identifiers linked. */
-const plainProse = (text: string, ctx: RefContext = itemCtx(currentItem())) =>
-  proseView(text, { compact: true, ctx });
+/** Agent-written prose (analysis, summaries): identifiers linked; with a field, notes anchor to it. */
+const plainProse = (text: string, ctx: RefContext = itemCtx(currentItem()), at?: FieldAt) =>
+  proseView(text, { compact: true, ctx, target: at ? fieldTarget(at) : null });
 
-/** A plain string with its identifiers linked (titles, notes, table cells). */
-function linked(text: string, ctx: RefContext = itemCtx(currentItem())): HTMLElement {
-  const refs = findRefs(text, IDX, ctx);
-  return h(
-    'span',
-    {},
-    segment(text, 0, text.length, refs).map((sg) => spanFor(sg)),
+/** Where a run of agent-written text lives: an item and a field path in it. */
+type FieldAt = { item: string; field: string };
+const fieldTarget = (at: FieldAt): AnnotationTarget => ({ kind: 'field', ...at });
+
+/** A plain string with its identifiers linked (titles, notes, table cells); with a field, annotatable. */
+function linked(text: string, ctx: RefContext = itemCtx(currentItem()), at?: FieldAt): HTMLElement {
+  const target = at ? fieldTarget(at) : null;
+  const marks = [...findRefs(text, IDX, ctx), ...(target ? marksFor(target, text) : [])];
+  return annotatable(
+    h(
+      'span',
+      { class: target ? 'field-text' : undefined },
+      segment(text, 0, text.length, marks).map((sg) => spanFor(sg)),
+    ),
+    target,
   );
 }
 
-/** A word diff of Markdown text: changes marked, emphasis styled, markers faint. */
-function wordDiff(before: string, after: string): HTMLElement {
-  // Hard-wrapped source reads as prose: a single line break (and its indent) is a space;
-  // a blank line stays a paragraph break.
-  const flow = (t: string) =>
-    t
-      .split(/\n[ \t]*\n/)
-      .map((para) => para.replace(/[ \t]*\n(?![ \t]*(?:[-*+]|\d+\.|\||#+)\s)[ \t]*/g, ' '))
-      .join('\n\n');
-  const parts = diffWords(flow(before), flow(after));
-  const ops: Range[] = [];
-  let text = '';
-  for (const d of parts) {
-    ops.push({ start: text.length, end: text.length + d.text.length, cls: `w-${d.op}` });
-    text += d.text;
+/**
+ * Line breaks in hard-wrapped Markdown, as rendered inside a diff: a blank line (a
+ * paragraph) or the break before a list item, heading, or table row stays a break;
+ * any other line break reads as the space it is in prose. Offsets are kept — the
+ * text itself is never rewritten — so a selection still maps to exact source.
+ */
+function breakRanges(text: string): Range[] {
+  const out: Range[] = [];
+  const re = /\n[ \t]*\n[ \t]*|\n[ \t]*(?=(?:[-*+]|\d+\.)\s|#+\s|\|)/g;
+  for (let m = re.exec(text); m; m = re.exec(text)) {
+    out.push({
+      start: m.index,
+      end: m.index + m[0].length,
+      cls: /\n[ \t]*\n/.test(m[0]) ? 'brk para' : 'brk',
+    });
   }
-  const segs = segment(text, 0, text.length, [...ops, ...inlineRanges(text)]);
+  return out;
+}
+
+/** One run of a diff, rendered: Markdown styled, its pieces classed, notes on it shown. */
+function diffRun(c: Composite, ctx: RefContext | undefined, cls: string): HTMLElement {
+  const ranges: Range[] = [
+    ...c.pieces.map(
+      (p): Range => ({ start: p.start, end: p.start + p.text.length, cls: p.cls ?? '' }),
+    ),
+    ...inlineRanges(c.text),
+    ...breakRanges(c.text),
+    ...compositeMarks(c),
+    ...(ctx ? findRefs(c.text, IDX, ctx) : []),
+  ].filter((r) => r.cls || r.id || r.link);
+  const el = h(
+    'div',
+    { class: cls },
+    segment(c.text, 0, c.text.length, ranges).map((sg) => {
+      const span = spanFor(sg);
+      span.dataset.o = String(sg.start);
+      return span;
+    }),
+  );
+  return compositeHost(el, c);
+}
+
+/** Where an edit's two wordings live, so notes on either anchor to real text. */
+type EditSources = {
+  before?: (AnnotationTarget & { off?: number }) | undefined;
+  after?: FieldAt | undefined;
+};
+
+/**
+ * An edit, shown in the reader's chosen mode: inline (one run, removed words struck,
+ * new words marked) or before and after (two blocks, what goes marked in the first,
+ * what comes in the second). Both are annotatable: the current wording against the
+ * file it is quoted from, the proposed wording against the edit's own field.
+ */
+function editDiff(
+  before: string,
+  after: string,
+  src: EditSources = {},
+  ctx?: RefContext,
+): HTMLElement {
+  const b = src.before ? { target: stripOff(src.before), off: src.before.off ?? 0 } : undefined;
+  const a = src.after ? { target: fieldTarget(src.after), off: 0 } : undefined;
+  const sources = { ...(b ? { before: b } : {}), ...(a ? { after: a } : {}) };
+  if (S.diff === 'inline') {
+    return h(
+      'div',
+      { class: 'wdiff inline' },
+      diffRun(inlineDiff(before, after, sources), ctx, 'drun'),
+    );
+  }
+  const sp = splitDiff(before, after, sources);
   return h(
     'div',
-    { class: 'wdiff' },
-    segs.map((sg) => h('span', { class: sg.cls.join(' ') || undefined }, sg.text)),
+    { class: 'wdiff split' },
+    h(
+      'div',
+      { class: 'dside d-before' },
+      h('div', { class: 'dlabel', 'aria-hidden': 'true' }, 'Current'),
+      diffRun(sp.before, ctx, 'drun'),
+    ),
+    h(
+      'div',
+      { class: 'dside d-after' },
+      h('div', { class: 'dlabel', 'aria-hidden': 'true' }, 'Proposed'),
+      diffRun(sp.after, ctx, 'drun'),
+    ),
   );
+}
+
+function stripOff(t: AnnotationTarget & { off?: number }): AnnotationTarget {
+  const { off: _off, ...rest } = t as AnnotationTarget & { off?: number };
+  return rest as AnnotationTarget;
+}
+
+/** An edit's current wording, as a target: the file at the offset it is quoted from. */
+function beforeSource(
+  path: string,
+  before: string,
+): (AnnotationTarget & { off: number }) | undefined {
+  const at = (fileText(path) ?? '').indexOf(before);
+  return at >= 0 ? { kind: 'file', path, off: at } : undefined;
 }
 
 /** A unified diff, highlighted by the file's language; paired -/+ runs get word diffs. */
@@ -634,59 +823,139 @@ function wordRanges(before: string, after: string, side: 'del' | 'ins'): Range[]
 // ---------------------------------------------------------------------------
 // Selection -> annotation
 
-function offsetOf(node: Node, offset: number): number | null {
+/**
+ * A selection boundary as an offset in its host's text. Inside a rendered span it is
+ * the span's offset plus the position in it; between nodes (a click-drag ending at a
+ * block's edge, a triple-click) it is the first offset-carrying span at or after the
+ * boundary, else the end of the last one before it. Spans of a nested host (a diff
+ * inside a file view) belong to that host and are skipped.
+ */
+function offsetOf(node: Node, offset: number, host: HTMLElement): number | null {
+  const own = (el: Element) => el.closest('.anno') === host;
   if (node.nodeType === Node.TEXT_NODE) {
     const span = node.parentElement?.closest('[data-o]') as HTMLElement | null;
-    return span ? Number(span.dataset.o) + Math.min(offset, node.textContent?.length ?? 0) : null;
+    if (span && own(span)) {
+      return Number(span.dataset.o) + Math.min(offset, node.textContent?.length ?? 0);
+    }
   }
-  const el = node as HTMLElement;
-  if (el.dataset?.o !== undefined) {
-    return Number(el.dataset.o) + (offset > 0 ? (el.textContent?.length ?? 0) : 0);
+  const at = document.createRange();
+  try {
+    at.setStart(node, offset);
+  } catch {
+    return null;
   }
-  const row = el.closest?.('.blk, .ln') as HTMLElement | null;
-  if (row) {
-    const child = row.children[offset] as HTMLElement | undefined;
-    return child?.dataset.o !== undefined ? Number(child.dataset.o) : Number(row.dataset.end);
+  let lastEnd: number | null = null;
+  for (const sp of host.querySelectorAll<HTMLElement>('[data-o]')) {
+    if (!own(sp)) continue;
+    if (at.comparePoint(sp, 0) >= 0) return Number(sp.dataset.o);
+    lastEnd = Number(sp.dataset.o) + (sp.textContent?.length ?? 0);
   }
-  if (el.classList?.contains('anno')) {
-    const child = el.children[offset] as HTMLElement | undefined;
-    if (child?.dataset.start) return Number(child.dataset.start);
-    const last = el.lastElementChild as HTMLElement | null;
-    return last ? Number(last.dataset.end) : null;
-  }
-  return null;
+  return lastEnd;
 }
 
 type Pending = { target: AnnotationTarget; start: number; end: number; item?: string };
+type Picked = { ok: true; p: Pending } | { ok: false; why: string; touched: boolean };
 
-function selectionTarget(): Pending | null {
+/** What a host is, in a reader's words, for a message about a selection. */
+function hostName(el: HTMLElement): string {
+  const k = el.dataset.kind;
+  if (k === 'file') return el.dataset.path as string;
+  if (k === 'field') return fieldLabel(el.dataset.field as string);
+  if (k === 'item') return 'the item as written';
+  if (k === 'composite') return el.closest('.d-before') ? 'the current wording' : 'the edit';
+  return 'this text';
+}
+
+const targetName = (t: AnnotationTarget): string =>
+  t.kind === 'file' ? t.path : t.kind === 'field' ? fieldLabel(t.field) : 'the item as written';
+
+/**
+ * The selection as something a note can anchor to — or why it cannot. A note
+ * anchors to one source: a file, an item's own text, or one field of agent-written
+ * text. Only the page's own chrome (buttons, labels, the ruling dock) is excluded.
+ */
+function selectionTarget(): Picked {
   const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null;
+  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) {
+    return {
+      ok: false,
+      why: 'Select some text first — anything in an item or in a file.',
+      touched: false,
+    };
+  }
   const r = sel.getRangeAt(0);
   const host = (n: Node) =>
     (n.nodeType === Node.TEXT_NODE ? n.parentElement : (n as HTMLElement))?.closest(
       '.anno',
     ) as HTMLElement | null;
   const a = host(r.startContainer);
-  if (!a || a !== host(r.endContainer)) return null;
-  const start = offsetOf(r.startContainer, r.startOffset);
-  const end = offsetOf(r.endContainer, r.endOffset);
-  if (start === null || end === null || end <= start) return null;
-  const target: AnnotationTarget =
-    a.dataset.kind === 'file'
-      ? { kind: 'file', path: a.dataset.path as string }
-      : { kind: 'item', item: a.dataset.item as string, section: a.dataset.section as string };
-  const text = targetText(target) ?? '';
+  const b = host(r.endContainer);
+  if (!a && !b) {
+    return {
+      ok: false,
+      why: 'That is the page’s own text (a label, a button, the ruling dock). Notes go on the item’s text, the passages, and the files.',
+      touched: false,
+    };
+  }
+  if (!a || !b) {
+    return {
+      ok: false,
+      why: `The selection runs into the page’s own labels. Select only text inside ${hostName((a ?? b) as HTMLElement)}.`,
+      touched: true,
+    };
+  }
+  if (a !== b) {
+    return {
+      ok: false,
+      why: `The selection runs from ${hostName(a)} into ${hostName(b)}; a note anchors to one of them. Select within one.`,
+      touched: true,
+    };
+  }
+  const start = offsetOf(r.startContainer, r.startOffset, a);
+  const end = offsetOf(r.endContainer, r.endOffset, a);
+  if (start === null || end === null || end <= start) {
+    return {
+      ok: false,
+      why: 'No text is selected there — only the page’s own markers.',
+      touched: true,
+    };
+  }
+  let target: AnnotationTarget;
   let s = start;
   let e = end;
+  if (a.dataset.kind === 'composite') {
+    const c = COMPOSITES.get(a.dataset.cid as string);
+    const m = c ? mapRange(c, start, end) : null;
+    if (!m) return { ok: false, why: 'This view changed; select the text again.', touched: true };
+    if (!m.ok) {
+      const why =
+        m.why === 'nothing'
+          ? `That text is what the edit removes — it exists in no file after the edit. To note it, press ${diffKeyHint()}, or select it in the file beside.`
+          : `The selection runs across ${(m.targets ?? []).map(targetName).join(' and ')}; a note anchors to one. Select within the edited text or around it.`;
+      return { ok: false, why, touched: true };
+    }
+    target = m.target;
+    s = m.start;
+    e = m.end;
+  } else if (a.dataset.kind === 'file') {
+    target = { kind: 'file', path: a.dataset.path as string };
+  } else if (a.dataset.kind === 'field') {
+    target = { kind: 'field', item: a.dataset.item as string, field: a.dataset.field as string };
+  } else {
+    target = { kind: 'item', item: a.dataset.item as string, section: a.dataset.section as string };
+  }
+  const text = targetText(target) ?? '';
   while (s < e && /\s/.test(text[s] as string)) s++;
   while (e > s && /\s/.test(text[e - 1] as string)) e--;
-  if (e <= s) return null;
+  if (e <= s) return { ok: false, why: 'Only blank space is selected.', touched: true };
   const p: Pending = { target, start: s, end: e };
   const it = currentItem();
   if (S.view === 'queue' && it && target.kind === 'file') p.item = it.id;
-  return p;
+  return { ok: true, p };
 }
+
+const diffKeyHint = () =>
+  S.diff === 'inline' ? 'b for before / after (the current wording is then its own block)' : 'b';
 
 const ANN_KEYS: [AnnotationKind, string, string][] = [
   ['comment', 'c', 'Comment'],
@@ -719,40 +988,99 @@ const ANN_TIP: Record<AnnotationKind, string> = {
     'Mismatch — this does not do what the intent says. The agent works out whether the code or the intent should change, and brings that choice back to you.',
 };
 
-const VERDICT_TIP: Record<VerdictKind, string> = {
-  accept:
-    'Accept — the proposal is right. The agent makes the intent edit as proposed, in its own change for review.',
-  amend:
-    'Amend — right direction, your words. You write the wording; the agent makes the intent edit with it.',
-  decline:
-    'Decline — no change to the intent. Give a one-line why; it is recorded on the item as its disposition.',
-  defer:
-    'Defer — not now. Optionally record your ruling to apply later; otherwise the item simply stays open.',
-  revise:
-    'Revise — send it back. The agent reworks the proposal or analysis as you ask and shows it again next pass.',
+/**
+ * Everything the page says about a verdict, in one place: its name on this item, the
+ * key, the tooltip, its one input (label, placeholder, required or not), and one line
+ * on what the agent does next. The vocabulary shifts with the item — a ruled item
+ * confirms, a change on a branch is approved or rejected — but the acts do not.
+ */
+type VerdictCopy = {
+  label: string;
+  tip: string;
+  input: { label: string; placeholder: string };
+  next: string;
 };
 
-const CHANGE_TIP: Record<VerdictKind, string> = {
-  accept: 'Approve — this change is right as it stands.',
-  amend: 'Amend — keep the change, in your wording. The agent applies it on the branch.',
-  decline:
-    'Reject — this change should not go in. Say why; the agent reverts or reworks it on the branch.',
-  defer: 'Defer — no ruling on this change yet.',
-  revise: 'Revise — the agent reworks this change as you ask and brings it back for another look.',
-};
-
-const RULED_TIP: Record<VerdictKind, string> = {
-  ...VERDICT_TIP,
-  accept:
-    'Confirm — this wording lands your earlier ruling. The agent makes the intent edit as proposed.',
-  amend: 'Amend — the ruling stands, the words do not. You write the wording; the agent lands it.',
-  decline:
-    'Decline — no intent edit after all. Give a one-line why; it replaces the recorded ruling.',
-};
-
-function tipsFor(it: Item): Record<VerdictKind, string> {
-  return isChange(it) ? CHANGE_TIP : it.ruled ? RULED_TIP : VERDICT_TIP;
+function verdictCopy(it: Item, k: VerdictKind): VerdictCopy {
+  const change = isChange(it);
+  const ruled = Boolean(it.ruled);
+  const yes = change ? 'Approve' : ruled ? 'Confirm' : 'Accept';
+  const where = change ? 'on the branch' : 'in an intent change for review';
+  switch (k) {
+    case 'accept':
+      return {
+        label: yes,
+        tip: `${yes} — ${ruled ? 'this wording lands your earlier ruling' : change ? 'this change is right as it stands' : 'the proposal is right as shown'}. A note is optional guidance; it never rewrites what lands — to change the wording, use ${yes} with changes. A note that would change what the edit says comes back to you to confirm instead of landing.`,
+        input: {
+          label: 'Note to the agent (optional) — guidance, not new wording',
+          placeholder:
+            'Anything to keep in mind while landing it… (to change the words, use “with changes”)',
+        },
+        next: change
+          ? 'Nothing to change: the agent reports the change approved.'
+          : `The agent makes the edit exactly as shown, ${where}.`,
+      };
+    case 'accept-with-changes':
+      return {
+        label: `${yes} with changes`,
+        tip: `${yes} with changes — yes, land it, but change it first as you say. You describe the change; the agent writes the new wording and lands it. Use Amend to write the words yourself, or Revise to see it again before anything lands.`,
+        input: {
+          label: 'What should change — the agent rewrites it to match',
+          placeholder: 'e.g. say what “hygiene” means in practice; keep the headline short…',
+        },
+        next: `The agent rewrites the edit as you describe and lands it ${where} — you see it in that change, not in another pass.`,
+      };
+    case 'amend':
+      return {
+        label: 'Amend',
+        tip: 'Amend — your exact words. You write the wording (it starts from the proposal); the agent lands it verbatim.',
+        input: {
+          label: change
+            ? 'Your exact wording — applied on the branch'
+            : 'Your exact wording — landed verbatim',
+          placeholder: 'What the text should say…',
+        },
+        next: `The agent lands your wording, word for word, ${where}.`,
+      };
+    case 'revise':
+      return {
+        label: 'Revise',
+        tip: 'Revise — not yet. Nothing lands; the agent reworks the proposal (or the analysis) as you ask and shows it to you again next pass.',
+        input: {
+          label: 'What to rework before you see it again',
+          placeholder: 'Rework it so that…',
+        },
+        next: 'Nothing lands now. The agent reworks it and brings it back in the next pass.',
+      };
+    case 'decline':
+      return {
+        label: change ? 'Reject' : 'Decline',
+        tip: change
+          ? 'Reject — this change should not go in. Say why; the agent reverts or reworks it on the branch.'
+          : `Decline — no change to the intent${ruled ? ' after all' : ''}. Say why in a line; it is recorded on the item as its disposition.`,
+        input: {
+          label: change ? 'Why reject it' : 'Why not — one line, recorded as the disposition',
+          placeholder: change ? 'What is wrong with this change…' : 'Why no intent change…',
+        },
+        next: change
+          ? 'The agent reverts or reworks the change on the branch.'
+          : 'No edit. The agent records your why on the item as declined.',
+      };
+    default:
+      return {
+        label: 'Defer',
+        tip: 'Defer — not now. The item stays open. Optionally record a ruling now, to be landed by a later edit.',
+        input: {
+          label: 'A ruling to record now (optional)',
+          placeholder: 'Leave empty to simply wait; or the ruling a later edit should land…',
+        },
+        next: 'The item stays open. A ruling, if you give one, is recorded on it as awaiting its edit.',
+      };
+  }
 }
+
+/** The verdict's name on this item: confirm on a ruled item, approve/reject on a change. */
+const verdictLabel = (it: Item, v: VerdictKind): string => verdictCopy(it, v).label;
 
 const VIEW_TIP: Record<View, string> = {
   home: 'Home — what this review is, what you are asked to do, how to work through it, and the keys.',
@@ -768,11 +1096,12 @@ const VIEW_TIP: Record<View, string> = {
 let editor: { annotation: Annotation; isNew: boolean } | null = null;
 
 function openEditor(kind: AnnotationKind): void {
-  const p = selectionTarget();
-  if (!p) {
-    toast('Select some text first — in an item, an intent passage, or any file.');
+  const picked = selectionTarget();
+  if (!picked.ok) {
+    toast(picked.why);
     return;
   }
+  const p = picked.p;
   const text = targetText(p.target) ?? '';
   const selector = createSelector(text, p.start, p.end);
   const annotation: Annotation = {
@@ -968,11 +1297,18 @@ function hideToolbar(): void {
 function showToolbar(): void {
   hideToolbar();
   if (editor || S.ended) return;
-  const p = selectionTarget();
+  const picked = selectionTarget();
   const sel = window.getSelection();
-  if (!p || !sel || sel.rangeCount === 0) return;
+  if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
   const rects = sel.getRangeAt(0).getClientRects();
   const rect = rects[0] ?? sel.getRangeAt(0).getBoundingClientRect();
+  if (!picked.ok) {
+    // Say why a selection that reaches the review's text cannot take a note here.
+    if (!picked.touched) return;
+    toolbarEl = h('div', { class: 'toolbar why', role: 'status' }, picked.why);
+    placeNear(toolbarEl, rect, 'above');
+    return;
+  }
   toolbarEl = h(
     'div',
     { class: 'toolbar', role: 'toolbar', 'aria-label': 'Add a note' },
@@ -1246,8 +1582,9 @@ const TABS: [View, string, string][] = [
 
 function header(): HTMLElement {
   const p = S.packet;
-  const ruled = S.review.verdicts.length;
-  const total = items().length;
+  const ruled = recordedCount();
+  const total = toRule().length;
+  const unfinished = toRule().filter((i) => rulingState(i.id) === 'unfinished').length;
   const sub =
     p.mode === 'branch' && p.change
       ? `${p.change.head.ref} → ${p.change.base.ref} · ${p.change.head.sha.slice(0, 7)}`
@@ -1286,7 +1623,10 @@ function header(): HTMLElement {
       { class: 'status' },
       h(
         'div',
-        { class: 'meter', tip: `${ruled} of ${total} items have your ruling` },
+        {
+          class: 'meter',
+          tip: `${ruled} of ${total} items have a recorded ruling${unfinished ? ` · ${unfinished} unfinished (chosen, missing words)` : ''}`,
+        },
         h(
           'div',
           { class: 'track' },
@@ -1308,6 +1648,16 @@ function header(): HTMLElement {
       h(
         'button',
         {
+          class: 'btn ghost sm diff-btn',
+          tip: 'How edits are shown: inline (struck and inserted words in one run) or before / after as two blocks (b)',
+          onclick: () => setDiff(S.diff === 'inline' ? 'split' : 'inline'),
+        },
+        h('span', { class: 'pre' }, 'Diff: '),
+        S.diff === 'inline' ? 'inline' : 'before / after',
+      ),
+      h(
+        'button',
+        {
           class: `btn ghost sm theme-btn ${S.picker ? 'on' : ''}`,
           tip: 'Theme — choose the colours, or add your own (t)',
           onclick: () => {
@@ -1317,6 +1667,19 @@ function header(): HTMLElement {
         },
         h('span', { class: 'swatch', style: theme ? swatchStyle(theme) : '' }),
         theme?.name ?? 'Theme',
+      ),
+      h(
+        'button',
+        {
+          class: `btn ghost sm help-btn ${S.help ? 'on' : ''}`,
+          tip: 'Legend and keys — what the colours, numbers, and outlines mean (?)',
+          'aria-label': 'Legend and keys',
+          onclick: () => {
+            S.help = !S.help;
+            render();
+          },
+        },
+        '?',
       ),
     ),
   );
@@ -1332,7 +1695,7 @@ const allThemes = (): Theme[] => [...THEMES, ...(S?.customThemes ?? [])];
 
 function swatchStyle(t: Theme): string {
   const c = t.colors;
-  return `background:conic-gradient(${c.accent} 0 25%, ${c.heading} 0 50%, ${c.xref} 0 75%, ${c.surface} 0)`;
+  return `background:conic-gradient(${c.accent} 0 25%, ${c.heading} 0 50%, ${c['accent-passage']} 0 75%, ${c.surface} 0)`;
 }
 
 function injectThemes(list: Theme[]): void {
@@ -1423,12 +1786,14 @@ function saveFolds(): void {
 function homeView(): HTMLElement {
   const p = S.packet;
   const its = items();
-  const count = (f: (i: Item) => boolean) => its.filter(f).length;
+  const live = (i: Item) => !i.decided;
+  const count = (f: (i: Item) => boolean) => its.filter((i) => live(i) && f(i)).length;
+  const recorded = (i: Item) => rulingState(i.id) === 'recorded';
   const firstOf = (f: (i: Item) => boolean) => {
     const order = displayOrder();
     const i =
-      order.find((n) => f(its[n] as Item) && !verdictOf((its[n] as Item).id)) ??
-      order.find((n) => f(its[n] as Item));
+      order.find((n) => live(its[n] as Item) && f(its[n] as Item) && !recorded(its[n] as Item)) ??
+      order.find((n) => live(its[n] as Item) && f(its[n] as Item));
     return i;
   };
   const asks: [string, string, (i: Item) => boolean][] = [
@@ -1470,8 +1835,9 @@ function homeView(): HTMLElement {
         !['question', 'decision', 'intent-change', 'design-entry'].includes(i.kind),
     ],
   ];
-  const ruled = S.review.verdicts.length;
-  const next = displayOrder().find((n) => !verdictOf((its[n] as Item).id));
+  const ruled = recordedCount();
+  const next = displayOrder().find((n) => live(its[n] as Item) && !recorded(its[n] as Item));
+  const decided = its.filter((i) => i.decided).length;
   const intro = p.mode === 'branch' && p.change ? p.change.summary : p.intro;
   return h(
     'main',
@@ -1522,7 +1888,7 @@ function homeView(): HTMLElement {
           .filter(([, , f]) => count(f) > 0)
           .map(([label, desc, f]) => {
             const n = count(f);
-            const done = its.filter((i) => f(i) && verdictOf(i.id)).length;
+            const done = its.filter((i) => live(i) && f(i) && recorded(i)).length;
             const first = firstOf(f);
             return h(
               'button',
@@ -1537,6 +1903,24 @@ function homeView(): HTMLElement {
               h('span', { class: 'ask-done small muted' }, done ? `${done} ruled` : ''),
             );
           }),
+        decided
+          ? h(
+              'div',
+              { class: 'ask ask-decided' },
+              h('span', { class: 'ask-n' }, String(decided)),
+              h(
+                'span',
+                { class: 'ask-body' },
+                h('strong', {}, 'Decided last time — context only'),
+                h(
+                  'span',
+                  { class: 'muted small' },
+                  'Your rulings from an earlier pass, kept in the queue to read beside the rest. They are not ruled again.',
+                ),
+              ),
+              h('span', { class: 'ask-done small muted' }, ''),
+            )
+          : null,
         p.mode === 'branch'
           ? h(
               'button',
@@ -1578,7 +1962,7 @@ function homeView(): HTMLElement {
         h(
           'span',
           { class: 'muted small' },
-          `${ruled} of ${its.length} ruled · ${S.review.annotations.length} notes · your work saves as you go`,
+          `${ruled} of ${toRule().length} ruled · ${S.review.annotations.length} notes · your work saves as you go`,
         ),
       ),
       h('h2', {}, 'How to go through it'),
@@ -1601,13 +1985,13 @@ function homeView(): HTMLElement {
           'li',
           {},
           h('strong', {}, 'Rule at the foot of the item. '),
-          'The consequences of each choice sit above the five rulings, so an obvious call takes no scrolling. Hover any ruling to see exactly what it asks of the agent.',
+          'Pick one of six rulings. Each opens one box with a label saying what to write, and a line saying what the agent will do next. Enter (or Record) records it: the box collapses to a ✓ chip, the queue marks the item, and the draft saves. Edit it any time. What each choice leads to is under Now what.',
         ),
         h(
           'li',
           {},
           h('strong', {}, 'Note anything, anywhere. '),
-          'Select text — in an item, in the intent, in code — and a small toolbar offers five kinds of note.',
+          'Select text — the question, What, an edit’s wording, a passage, any file, code — and a small toolbar offers five kinds of note. If a selection cannot take a note, the toolbar says why.',
         ),
         h(
           'li',
@@ -1635,27 +2019,111 @@ function homeView(): HTMLElement {
           ),
         ),
       ),
-      h('h2', {}, 'Your rulings'),
-      h(
-        'dl',
-        { class: 'defs' },
-        VERDICT_KEYS.map(([k, key]) => [
-          h('dt', {}, h('span', { class: `vchip v-${k}` }, k), h('kbd', {}, key)),
-          h('dd', {}, VERDICT_TIP[k].replace(/^[^—]+— /, '')),
-        ]),
-      ),
-      h('h2', {}, 'Kinds of note'),
-      h(
-        'dl',
-        { class: 'defs' },
-        ANN_KEYS.map(([k, key, label]) => [
-          h('dt', {}, h('span', { class: `pill k-${k}` }, label), h('kbd', {}, key)),
-          h('dd', {}, ANN_TIP[k].replace(/^[^—]+— /, '')),
-        ]),
-      ),
-      h('h2', {}, 'Keyboard'),
-      keysTable(),
+      h('h2', { id: 'legend' }, 'Legend'),
+      legend(false),
     ),
+  );
+}
+
+/**
+ * The legend: what to do, the rulings, what the marks and colours mean, the kinds
+ * of note, and the keys. One source, shown in full on the home page and compact in
+ * the overlay any view opens with ? — so the two never disagree.
+ */
+function legend(compact: boolean): HTMLElement {
+  const it = currentItem() ?? items()[0];
+  const sample = (cls: string, text: string, tip?: string) => h('span', { class: cls, tip }, text);
+  const row = (mark: Child, text: string) =>
+    h('div', { class: 'lg-row' }, h('span', { class: 'lg-mark' }, mark), h('span', {}, text));
+  const sec = (title: string, ...body: Child[]) =>
+    h('section', { class: 'lg-sec' }, h('h3', { class: 'lg-title' }, title), body);
+  return h(
+    'div',
+    { class: `legend ${compact ? 'compact' : ''}` },
+    sec(
+      'What to do',
+      h(
+        'ol',
+        { class: 'lg-steps' },
+        h('li', {}, 'Open an item (2, or j / k). Read the question, then What, So what, Now what.'),
+        h('li', {}, 'Check the numbered passages beside it — click a number, or [ and ].'),
+        h(
+          'li',
+          {},
+          'Rule at the foot: pick one, write in its one box, press Enter. A ✓ chip means it is recorded.',
+        ),
+        h('li', {}, 'Select any text to leave a note. Then Review & submit (5).'),
+      ),
+    ),
+    sec(
+      'Rulings',
+      VERDICT_KEYS.map(([k, key]) =>
+        row(
+          [h('span', { class: `vchip v-${k}` }, it ? verdictLabel(it, k) : k), h('kbd', {}, key)],
+          it ? verdictCopy(it, k).next : '',
+        ),
+      ),
+      row(sample('vbtn-sample rec', 'Dashed'), 'The ruling the agent recommends — advice only.'),
+      row(
+        sample('vchip solid v-accept', '✓ Ruled'),
+        'Recorded: what the agent will receive. Edit (e) or clear (u) it any time.',
+      ),
+      row(
+        sample('vchip unfinished', 'unfinished'),
+        'Chosen but missing its words — kept in the draft, not recorded.',
+      ),
+    ),
+    sec(
+      'Passages and marks',
+      row(
+        sample('pn pn-edit', '1'),
+        'A passage this item would edit. Solid outline. Same number in the middle and beside.',
+      ),
+      row(
+        sample('pn pn-evidence', '2'),
+        'Evidence quoted under What — not edited. Dotted outline.',
+      ),
+      row(
+        sample('pctx', 'Context'),
+        'A passage in a related file, shown for what it says; not edited.',
+      ),
+      row(
+        sample('plabel-also', '⚠'),
+        'Another item edits the same passage; the callout says what lands if you accept both.',
+      ),
+      row(
+        sample('swatch-pass', 'tint'),
+        'The passages in question carry the passage colour: marker, margin rule, and tint.',
+      ),
+    ),
+    sec(
+      'Badges and colours',
+      row(sample('tag at-judgment', 'needs judgment'), 'Reasonable people differ: read it all.'),
+      row(
+        sample('tag at-routine', 'routine'),
+        'Bookkeeping or a wording fix; What and So what fold to a line.',
+      ),
+      row(sample('tag ruled', 'ruled'), 'Already ruled earlier: this pass confirms the wording.'),
+      row(
+        [sample('w-del', 'removed'), ' ', sample('w-ins', 'added')],
+        'Words an edit removes and adds (b switches inline / before and after).',
+      ),
+      row(sample('xref-sample', 'IF-005'), 'An identifier or path: hover to peek, click to go.'),
+      row(
+        ANN_KEYS.map(([k]) => h('span', { class: `hl hl-${k} lg-hl` }, ' ')),
+        'Your notes, tinted by kind: comment, question, suggestion, intent here, mismatch.',
+      ),
+    ),
+    sec(
+      'Notes on selected text',
+      ANN_KEYS.map(([k, key, label]) =>
+        row(
+          [h('span', { class: `pill k-${k}` }, label), h('kbd', {}, key)],
+          ANN_TIP[k].replace(/^[^—]+— /, '').split('. ')[0] as string,
+        ),
+      ),
+    ),
+    sec('Keys', keysTable()),
   );
 }
 
@@ -1665,14 +2133,16 @@ function keysTable(): HTMLElement {
     ['j k', 'Next / previous item (or file)'],
     ['n', 'Next unreviewed item'],
     ['[ ]', 'Previous / next passage beside the item'],
-    ['a m d f r', 'Accept · amend · decline · defer · revise'],
-    ['u', 'Clear the ruling'],
+    ['a w m r d f', 'Accept · with changes · amend · revise · decline · defer'],
+    ['↵', 'Record the open ruling (Shift+↵ for a new line)'],
+    ['e u', 'Edit · clear the ruling'],
+    ['b', 'Edits inline, or before / after'],
     ['c q s i x', 'Comment · question · suggest · intent here · mismatch — on selected text'],
     ['p', 'This session: every ruling and note'],
     ['v', 'Markdown as prose / as source'],
     ['/', 'Filter files'],
     ['t', 'Themes'],
-    ['?', 'This list'],
+    ['?', 'Legend and keys, from anywhere'],
     ['⌘↵ Esc', 'Confirm / leave a text field'],
   ];
   return h(
@@ -1734,11 +2204,12 @@ function drawer(): HTMLElement | null {
       { class: 'drawer-body', 'data-scroll': 'drawer' },
       h('h3', {}, 'Rulings'),
       rulings.length === 0
-        ? h('p', { class: 'muted small' }, 'None yet. Rule on an item with a, m, d, f, or r.')
+        ? h('p', { class: 'muted small' }, 'None yet. Rule on an item with a, w, m, r, d, or f.')
         : null,
       rulings.map((v) => {
         const it = itemById(v.item);
-        const words = v.wording ?? v.why ?? v.ruling ?? v.request ?? '';
+        const words = v[VERDICT_WORDS[v.verdict].field] ?? '';
+        const state = rulingState(v.item);
         return h(
           'div',
           { class: 'entry' },
@@ -1753,6 +2224,7 @@ function drawer(): HTMLElement | null {
               { class: `vchip v-${v.verdict}` },
               it ? verdictLabel(it, v.verdict) : v.verdict,
             ),
+            state === 'recorded' ? null : h('span', { class: 'vchip unfinished' }, state),
             h('span', { class: 'entry-title' }, it?.title ?? v.item),
             words ? h('span', { class: 'entry-words' }, clip(words, 120)) : null,
           ),
@@ -1837,6 +2309,7 @@ function jumpTo(a: Annotation): void {
       0,
       items().findIndex((i) => i.id === target.item),
     );
+    if (target.kind === 'field') S.jump = { item: target.item, field: target.field };
   }
   scrollWanted = true;
   render();
@@ -1854,11 +2327,13 @@ const GROUPS: [string, string][] = [
   ['none', 'To review'],
   ['ruled', 'Already ruled — confirm the wording'],
   ['routine', 'Routine'],
+  ['decided', 'Decided earlier — context only'],
 ];
 
-const groupOf = (it: Item): string => (it.ruled ? 'ruled' : (it.attention ?? 'none'));
+const groupOf = (it: Item): string =>
+  it.decided ? 'decided' : it.ruled ? 'ruled' : (it.attention ?? 'none');
 
-const grouped = () => items().some((it) => it.attention || it.ruled);
+const grouped = () => items().some((it) => it.attention || it.ruled || it.decided);
 
 function displayOrder(): number[] {
   const idx = items().map((_, i) => i);
@@ -1875,10 +2350,24 @@ function step(d: number): void {
 function queueRow(it: Item, i: number): HTMLElement {
   const v = verdictOf(it.id);
   const notes = annotationsForItem(it.id).length;
+  const state = it.decided ? 'decided' : rulingState(it.id);
+  const dotTip = {
+    none: 'Not ruled yet',
+    open: 'Ruling open — not recorded yet',
+    unfinished: 'Unfinished: a ruling is chosen but missing its words; not recorded',
+    recorded: 'Ruling recorded',
+    decided: 'Decided in an earlier pass — context only',
+  }[state];
   return h(
     'button',
-    { class: `qi ${i === S.current ? 'on' : ''} ${v ? 'done' : ''}`, onclick: () => select(i) },
-    h('span', { class: `dot v-${v?.verdict ?? 'none'}` }),
+    {
+      class: `qi ${i === S.current ? 'on' : ''} ${state === 'recorded' ? 'done' : ''} qs-${state}`,
+      onclick: () => select(i),
+    },
+    h('span', {
+      class: `dot v-${it.decided?.verdict ?? v?.verdict ?? 'none'} ds-${state}`,
+      tip: dotTip,
+    }),
     h(
       'span',
       { class: 'qbody' },
@@ -1888,13 +2377,23 @@ function queueRow(it: Item, i: number): HTMLElement {
         h('span', { class: 'mono' }, shortId(it.id)),
         it.category === 'inline' ? h('span', { class: 'tag' }, 'inline') : null,
         !isIntentFeedback(it.kind) ? h('span', { class: 'tag' }, kindLabel(it)) : null,
+        it.decided
+          ? h(
+              'span',
+              { class: `vchip faint v-${it.decided.verdict}` },
+              verdictLabel(it, it.decided.verdict),
+            )
+          : v && state === 'recorded'
+            ? h('span', { class: `vchip v-${v.verdict}` }, `✓ ${verdictLabel(it, v.verdict)}`)
+            : v
+              ? h('span', { class: 'vchip unfinished' }, state === 'open' ? 'open' : 'unfinished')
+              : null,
       ),
       h('span', { class: 'qt' }, it.question),
     ),
     h(
       'span',
       { class: 'qside' },
-      v ? h('span', { class: `vchip v-${v.verdict}` }, verdictLabel(it, v.verdict)) : null,
       notes ? h('span', { class: 'badge', title: `${notes} notes` }, String(notes)) : null,
     ),
   );
@@ -1982,17 +2481,57 @@ function stepPassage(d: number): void {
 }
 
 /** The passage number as a small badge; a click shows it beside the item. */
-function pnum(p: Passage | undefined): HTMLElement | null {
+function pnum(p: Passage | undefined, it: Item | undefined = currentItem()): HTMLElement | null {
   if (!p || p.n === 0) return null;
   return h(
     'button',
     {
       class: `pn pn-${p.role}`,
-      tip: `Passage ${p.n} — show it beside, in its file`,
+      tip: it ? passageTip(it, p, 'middle') : `Passage ${p.n}`,
       onclick: () => showPassage(p),
     },
     String(p.n),
   );
+}
+
+/**
+ * What a passage marker means, said on hover: which passage, whose, what it is (an
+ * edit this item proposes, or evidence quoted under What), where it is, what its
+ * outline means, and what a click does.
+ */
+function passageTip(it: Item, p: Passage, where: 'middle' | 'pane' | 'tab'): string {
+  const text = fileText(p.path) ?? '';
+  const loc = `${p.path}:${lineOf(text, p.start)}`;
+  const lines: string[] = [];
+  if (p.role === 'edit') {
+    const e = it.nowWhat?.edits?.[p.edit ?? 0];
+    lines.push(
+      `Passage ${p.n} — an edit ${shortId(it.id)} proposes${e?.note ? `: ${e.note}` : ''}`,
+    );
+    lines.push(`In ${loc}.`);
+    if (p.evidence.length) lines.push('The same text is quoted under What.');
+    lines.push('Solid outline: this item would rewrite this text.');
+  } else {
+    const r = it.evidence[p.evidence[0] ?? 0];
+    lines.push(
+      `Passage ${p.n} — evidence ${shortId(it.id)} quotes under What${r?.note ? `: ${r.note}` : ''}`,
+    );
+    lines.push(`In ${loc}.`);
+    lines.push('Dotted outline: quoted as evidence — this item does not edit it.');
+  }
+  if (p.also.length) {
+    lines.push(
+      `Also edited by ${p.also.map((x) => shortId(x.item)).join(', ')} — see the ⚠ callout.`,
+    );
+  }
+  lines.push(
+    where === 'middle'
+      ? 'Click to show it beside, in its whole file.'
+      : where === 'tab'
+        ? 'Open the tab to see it marked in place.'
+        : 'Numbered to match the item in the middle.',
+  );
+  return lines.join('\n');
 }
 
 const firstSentenceOf = (md: string): string => {
@@ -2058,7 +2597,13 @@ function quoteBlock(it: Item, r: Ref, i: number): HTMLElement {
       missing ? h('span', { class: 'warn meta' }, 'quote not found in the snapshot') : null,
     ),
     excerpt(r),
-    r.note ? h('p', { class: 'qnote' }, linked(r.note, itemCtx(it))) : null,
+    r.note
+      ? h(
+          'p',
+          { class: 'qnote' },
+          linked(r.note, itemCtx(it), { item: it.id, field: `evidence[${i}].note` }),
+        )
+      : null,
   );
 }
 
@@ -2093,6 +2638,8 @@ function itemDetail(it: Item): HTMLElement {
   const sw = it.soWhat;
   const nw = it.nowWhat;
   const prepared = Boolean(w || sw || nw);
+  /** Where a field of this item's agent-written text lives: notes on it anchor there. */
+  const at = (field: string): FieldAt => ({ item: it.id, field });
 
   // ---- the head: the question, then what the item is called and where it lives
   const head = h(
@@ -2133,14 +2680,37 @@ function itemDetail(it: Item): HTMLElement {
         ? refLink(sourceRef, `${it.source.path}:${it.source.line}`, 'quiet')
         : h('span', { class: 'mono meta' }, `${it.source.path}:${it.source.line}`),
     ),
-    h('h1', { class: 'question' }, linked(it.question, ctx)),
+    h('h1', { class: 'question' }, linked(it.question, ctx, at('question'))),
     h(
       'p',
       { class: 'subtitle' },
       h('span', { class: 'mono' }, shortId(it.id)),
       h('span', { class: 'sep' }, '·'),
-      linked(it.title, ctx),
+      linked(it.title, ctx, at('title')),
     ),
+    it.decided
+      ? h(
+          'div',
+          { class: 'callout decided-note' },
+          h(
+            'div',
+            { class: 'callout-label' },
+            `Decided${it.decided.pass ? ` in pass ${it.decided.pass}` : ' earlier'} — shown for context, not ruled again`,
+          ),
+          h(
+            'p',
+            {},
+            h(
+              'span',
+              { class: `vchip v-${it.decided.verdict}` },
+              verdictLabel(it, it.decided.verdict),
+            ),
+            ' ',
+            h('strong', {}, `${it.decided.by}, ${it.decided.on}`),
+            it.decided.words ? [': ', it.decided.words] : null,
+          ),
+        )
+      : null,
     it.members?.length
       ? h(
           'p',
@@ -2160,7 +2730,7 @@ function itemDetail(it: Item): HTMLElement {
             h('strong', {}, `${it.ruled.by}, ${it.ruled.on}`),
             it.ruled.where ? h('span', { class: 'meta' }, ` (${it.ruled.where})`) : null,
             ': ',
-            linked(it.ruled.ruling, ctx),
+            linked(it.ruled.ruling, ctx, at('ruled.ruling')),
           ),
         )
       : null,
@@ -2179,7 +2749,7 @@ function itemDetail(it: Item): HTMLElement {
 
   // ---- What: the facts — the passages quoted, what the build ran into, the assumption
   const whatBody: Child[] = [
-    w ? plainProse(w.facts, ctx) : null,
+    w ? plainProse(w.facts, ctx, at('what.facts')) : null,
     !prepared && !isChange(it)
       ? h(
           'p',
@@ -2199,7 +2769,7 @@ function itemDetail(it: Item): HTMLElement {
     w?.ranInto
       ? [
           subhead(isIntentFeedback(it.kind) ? 'What the build ran into' : 'What prompted it'),
-          plainProse(w.ranInto, ctx),
+          plainProse(w.ranInto, ctx, at('what.ranInto')),
         ]
       : null,
     w?.assumption
@@ -2209,7 +2779,7 @@ function itemDetail(it: Item): HTMLElement {
               ? 'The assumption made to keep moving'
               : 'The assumption in place meanwhile',
           ),
-          plainProse(w.assumption, ctx),
+          plainProse(w.assumption, ctx, at('what.assumption')),
         ]
       : null,
     it.changes?.length
@@ -2262,7 +2832,7 @@ function itemDetail(it: Item): HTMLElement {
   const cols = collisionsOf(it);
   const rels = sw?.relations ?? [];
   const relRows = [
-    ...rels.map((r) => {
+    ...rels.map((r, j) => {
       const col = cols.find((c) => c.item === r.item);
       return h(
         'li',
@@ -2271,7 +2841,7 @@ function itemDetail(it: Item): HTMLElement {
         h(
           'span',
           {},
-          linked(r.note, ctx),
+          linked(r.note, ctx, at(`soWhat.relations[${j}].note`)),
           col ? h('span', { class: 'col-flag' }, ' · edits the same passage') : null,
         ),
       );
@@ -2293,7 +2863,7 @@ function itemDetail(it: Item): HTMLElement {
       ),
   ];
   const soWhatBody: Child[] = [
-    sw ? plainProse(sw.stakes, ctx) : null,
+    sw ? plainProse(sw.stakes, ctx, at('soWhat.stakes')) : null,
     relRows.length
       ? [subhead('How it touches other items'), h('ul', { class: 'rel' }, relRows)]
       : null,
@@ -2303,10 +2873,17 @@ function itemDetail(it: Item): HTMLElement {
   const edits = nw?.edits ?? [];
   const rec = nw?.recommendation;
   const nowBody: Child[] = [
-    nw?.summary ? h('div', { class: 'lead-prose' }, plainProse(nw.summary, ctx)) : null,
+    nw?.summary
+      ? h('div', { class: 'lead-prose' }, plainProse(nw.summary, ctx, at('nowWhat.summary')))
+      : null,
     edits.length
       ? [
-          subhead(edits.length === 1 ? 'The proposed edit' : 'The proposed edits'),
+          h(
+            'div',
+            { class: 'subhead-row' },
+            subhead(edits.length === 1 ? 'The proposed edit' : 'The proposed edits'),
+            diffToggle(),
+          ),
           edits.map((e, i) => editBlock(it, e, i)),
         ]
       : null,
@@ -2325,7 +2902,7 @@ function itemDetail(it: Item): HTMLElement {
                     { class: 'callout-label' },
                     isChange(it) ? 'If approved' : 'If accepted',
                   ),
-                  plainProse(nw.ifAccepted, ctx),
+                  plainProse(nw.ifAccepted, ctx, at('nowWhat.ifAccepted')),
                 )
               : null,
             nw.ifDeclined
@@ -2337,7 +2914,7 @@ function itemDetail(it: Item): HTMLElement {
                     { class: 'callout-label' },
                     isChange(it) ? 'If rejected' : 'If declined',
                   ),
-                  plainProse(nw.ifDeclined, ctx),
+                  plainProse(nw.ifDeclined, ctx, at('nowWhat.ifDeclined')),
                 )
               : null,
           ),
@@ -2355,13 +2932,13 @@ function itemDetail(it: Item): HTMLElement {
               'span',
               {
                 class: `vchip v-${rec.verdict}`,
-                tip: (isChange(it) ? CHANGE_TIP : VERDICT_TIP)[rec.verdict],
+                tip: verdictTip(it, rec.verdict),
               },
-              capitalize(verdictLabel(it, rec.verdict)),
+              verdictLabel(it, rec.verdict),
             ),
             h('span', { class: 'meta' }, 'advice only — the ruling is yours'),
           ),
-          h('p', {}, linked(rec.why, ctx)),
+          h('p', {}, linked(rec.why, ctx, at('nowWhat.recommendation.why'))),
         )
       : null,
     !nw && !isChange(it)
@@ -2413,6 +2990,53 @@ function itemDetail(it: Item): HTMLElement {
   return h('main', { class: 'center', 'data-scroll': `detail:${it.id}` }, doc, rulingBar(it, v));
 }
 
+/** The composed wording for this item and another, wherever it is declared: which item holds it, at which index. */
+function composedFor(
+  it: Item,
+  other: string,
+): { c: Composed; owner: string; k: number } | undefined {
+  const own = it.nowWhat?.composed ?? [];
+  const mine = own.findIndex((c) => c.with.includes(other));
+  if (mine >= 0) return { c: own[mine] as Composed, owner: it.id, k: mine };
+  const o = itemById(other);
+  const theirs = o?.nowWhat?.composed ?? [];
+  const k = theirs.findIndex((c) => c.with.includes(it.id));
+  if (o && k >= 0) return { c: theirs[k] as Composed, owner: o.id, k };
+  return undefined;
+}
+
+/** The diff-mode switch: inline, or before and after. Global, remembered between reviews (b). */
+function diffToggle(): HTMLElement {
+  return h(
+    'div',
+    { class: 'seg seg-sm diff-toggle', role: 'group', 'aria-label': 'How edits are shown' },
+    h(
+      'button',
+      {
+        class: `pill ${S.diff === 'inline' ? 'on' : ''}`,
+        tip: 'Inline — one run: removed words struck through, new words marked (b)',
+        onclick: () => setDiff('inline'),
+      },
+      'Inline',
+    ),
+    h(
+      'button',
+      {
+        class: `pill ${S.diff === 'split' ? 'on' : ''}`,
+        tip: 'Before / after — the current and the proposed wording as two blocks, each with its changes marked (b)',
+        onclick: () => setDiff('split'),
+      },
+      'Before / after',
+    ),
+  );
+}
+
+function setDiff(mode: DiffMode, save = true): void {
+  S.diff = mode;
+  if (save) api('PUT', '/api/prefs', { diff: mode }).catch(() => undefined);
+  render();
+}
+
 /** One proposed edit: its number, where it lands, the word diff, and any collision. */
 function editBlock(it: Item, e: Edit, i: number): HTMLElement {
   const ip = passagesOf(it);
@@ -2434,12 +3058,25 @@ function editBlock(it: Item, e: Edit, i: number): HTMLElement {
       ),
       at < 0 ? h('span', { class: 'warn meta' }, 'the “before” text is not in the snapshot') : null,
     ),
-    e.note ? h('p', { class: 'qnote' }, linked(e.note, ctx)) : null,
-    wordDiff(e.before, e.after),
+    e.note
+      ? h(
+          'p',
+          { class: 'qnote' },
+          linked(e.note, ctx, { item: it.id, field: `nowWhat.edits[${i}].note` }),
+        )
+      : null,
+    editDiff(
+      e.before,
+      e.after,
+      {
+        before: beforeSource(e.path, e.before),
+        after: { item: it.id, field: `nowWhat.edits[${i}].after` },
+      },
+      ctx,
+    ),
     others.map((o) => {
-      const composed =
-        it.nowWhat?.composed?.find((c) => c.with.includes(o.item)) ??
-        itemById(o.item)?.nowWhat?.composed?.find((c) => c.with.includes(it.id));
+      const found = composedFor(it, o.item);
+      const composed = found?.c;
       return h(
         'div',
         { class: 'collision' },
@@ -2453,8 +3090,22 @@ function editBlock(it: Item, e: Edit, i: number): HTMLElement {
                 composed.note ? linked(composed.note, ctx) : null,
               ),
               composed.edits
-                .filter((c) => c.path === e.path)
-                .map((c) => wordDiff(c.before, c.after)),
+                .map((c, j) => ({ c, j }))
+                .filter(({ c }) => c.path === e.path)
+                .map(({ c, j }) =>
+                  editDiff(
+                    c.before,
+                    c.after,
+                    {
+                      before: beforeSource(c.path, c.before),
+                      after: {
+                        item: (found as { owner: string }).owner,
+                        field: `nowWhat.composed[${(found as { k: number }).k}].edits[${j}].after`,
+                      },
+                    },
+                    ctx,
+                  ),
+                ),
             ]
           : h(
               'p',
@@ -2513,166 +3164,110 @@ function noteList(list: Annotation[]): HTMLElement {
           h('button', { class: 'btn ghost sm', onclick: () => editAnnotation(a.id) }, 'Edit'),
         ),
         h('div', { class: 'note-quote' }, q.length > 280 ? `${q.slice(0, 280)}…` : q),
-        a.kind === 'suggestion' ? wordDiff(q, a.suggestion ?? '') : null,
+        a.kind === 'suggestion' ? editDiff(q, a.suggestion ?? '') : null,
         a.comment ? h('p', {}, a.comment) : null,
       );
     }),
   );
 }
 
-// The ruling bar: sticky at the foot of the item.
+// The ruling dock: pinned to the foot of the item. Its button row is the last thing
+// in it, and the dock grows upward from there — so a click on a verdict never moves
+// the button under the cursor, however much the form above it needs.
 
 const VERDICT_KEYS: [VerdictKind, string][] = [
   ['accept', 'a'],
+  ['accept-with-changes', 'w'],
   ['amend', 'm'],
+  ['revise', 'r'],
   ['decline', 'd'],
   ['defer', 'f'],
-  ['revise', 'r'],
 ];
 
-function fieldCopy(it: Item, field: string): { label: string; placeholder: string } {
-  const change = isChange(it);
-  switch (field) {
-    case 'wording':
-      return {
-        label: change
-          ? 'Your wording — the agent applies it on the branch'
-          : 'Your wording for the intent edit',
-        placeholder: 'What the text should say…',
-      };
-    case 'why':
-      return {
-        label: change
-          ? 'Why reject — the agent reverts or reworks it'
-          : 'Why — one line; it becomes the declined disposition',
-        placeholder: change ? 'What is wrong with this change…' : 'Why no intent change…',
-      };
-    case 'ruling':
-      return {
-        label: 'Ruling to record now (optional — leave empty to simply wait)',
-        placeholder: 'The ruling, applied by a later intent edit…',
-      };
-    default:
-      return {
-        label: 'What should change in the proposal or analysis',
-        placeholder: 'Rework it so that…',
-      };
-  }
+/** The first sentence of a consequence, for a verdict's tooltip. */
+const gist = (md?: string) => (md ? firstSentenceOf(md) : '');
+
+function verdictTip(it: Item, k: VerdictKind): string {
+  const c = verdictCopy(it, k);
+  const nw = it.nowWhat;
+  const then =
+    k === 'accept' || k === 'accept-with-changes' || k === 'amend'
+      ? nw?.ifAccepted
+        ? `\nIf accepted: ${gist(nw.ifAccepted)}`
+        : ''
+      : k === 'decline' && nw?.ifDeclined
+        ? `\nIf declined: ${gist(nw.ifDeclined)}`
+        : '';
+  return `${c.tip}\nNext: ${c.next}${then}`;
 }
 
-/**
- * The ruling dock, pinned to the foot of the item: the consequences of each
- * choice, then the five rulings — the page's call to action.
- */
 function rulingBar(it: Item, v: Verdict | undefined): HTMLElement {
-  const field = v ? (v.verdict === 'defer' ? 'ruling' : REQUIRED_WORDS[v.verdict]) : null;
-  const blur = () => (document.activeElement as HTMLElement | null)?.blur();
+  if (it.decided) return decidedBar(it);
+  const state = rulingState(it.id);
   const a = it.nowWhat;
-  const ctx = itemCtx(it);
-  const tips = tipsFor(it);
-  let words: HTMLTextAreaElement | null = null;
-  if (v && field) {
-    const copy = fieldCopy(it, field);
-    words = h('textarea', {
-      id: 'verdict-words',
-      class: `field ${field === 'wording' ? 'mono' : ''}`,
-      rows:
-        field === 'wording' ? Math.min(8, Math.max(3, (v[field] ?? '').split('\n').length + 1)) : 2,
-      placeholder: copy.placeholder,
-      'aria-label': copy.label,
-      oninput: (e: Event) => {
-        v[field] = (e.target as HTMLTextAreaElement).value;
-        changed();
-      },
-      onkeydown: fieldKeys(blur, blur),
-    }) as HTMLTextAreaElement;
-    words.value = v[field] ?? '';
-  }
-  const side =
-    v?.verdict === 'accept' || v?.verdict === 'amend'
-      ? 'yes'
-      : v?.verdict === 'decline'
-        ? 'no'
-        : '';
-  const consequence = (which: 'yes' | 'no', text: string) =>
-    h(
-      'button',
-      {
-        class: `conseq c-${which} ${side === which ? 'picked' : ''}`,
-        tip: 'Click to read it in full',
-        onclick: (e: Event) => (e.currentTarget as HTMLElement).classList.toggle('full'),
-      },
+  const hasConseq = Boolean(a?.ifAccepted || a?.ifDeclined);
+  let top: HTMLElement;
+  if (state === 'open' && v) top = rulingForm(it, v);
+  else if ((state === 'recorded' || state === 'unfinished') && v) top = rulingChip(it, v, state);
+  else {
+    top = h(
+      'div',
+      { class: 'ruling-hint' },
       h(
         'span',
-        { class: 'eyebrow' },
-        which === 'yes'
-          ? isChange(it)
-            ? 'If approved'
-            : 'If accepted'
-          : isChange(it)
-            ? 'If rejected'
-            : 'If declined',
+        {},
+        'Choose a ruling. Each asks one thing of you and says what the agent does next.',
       ),
-      h('span', { class: 'conseq-text' }, linked(text, ctx)),
+      a?.recommendation
+        ? h(
+            'span',
+            { class: 'muted' },
+            ` The agent recommends ${verdictLabel(it, a.recommendation.verdict)} (dashed).`,
+          )
+        : null,
+      hasConseq
+        ? h(
+            'button',
+            {
+              class: 'link-btn',
+              onclick: () => scrollToOutcomes(),
+              tip: 'Show what each choice leads to, under Now what',
+            },
+            'What each choice leads to ↑',
+          )
+        : null,
     );
-  const hasConseq = Boolean(a?.ifAccepted || a?.ifDeclined);
+  }
   return h(
     'div',
     {
-      class: `ruling ${v ? `ruled v-${v.verdict}` : 'unruled'}`,
+      class: `ruling st-${state} ${v ? `v-${v.verdict}` : ''}`,
       role: 'region',
       'aria-label': 'Your ruling',
     },
-    hasConseq
-      ? collapsible(
-          'Consequences',
-          h(
-            'div',
-            { class: 'conseqs' },
-            a?.ifAccepted ? consequence('yes', a.ifAccepted) : null,
-            a?.ifDeclined ? consequence('no', a.ifDeclined) : null,
-          ),
-          true,
-          0,
-          'dock-consequences',
-        )
-      : null,
+    h('div', { class: 'ruling-top' }, top),
     h(
       'div',
       { class: 'ruling-head' },
       h('span', { class: 'ruling-title' }, 'Your ruling'),
-      v
-        ? h('span', { class: `vchip v-${v.verdict}` }, `✓ ${verdictLabel(it, v.verdict)}`)
-        : h('span', { class: 'muted small' }, 'not ruled yet'),
-      a?.recommendation && !v
-        ? h(
-            'span',
-            { class: 'muted small' },
-            `· agent recommends ${verdictLabel(it, a.recommendation.verdict)}`,
-          )
-        : null,
+      h(
+        'span',
+        { class: `ruling-state rs-${state}` },
+        state === 'none'
+          ? 'not ruled yet'
+          : state === 'open'
+            ? 'not recorded yet — Enter records it'
+            : state === 'unfinished'
+              ? 'unfinished — not recorded'
+              : `recorded · ${verdictLabel(it, (v as Verdict).verdict)}`,
+      ),
       h('span', { class: 'grow' }),
-      v
-        ? h(
-            'button',
-            {
-              class: 'btn ghost sm',
-              tip: 'Clear this ruling (u)',
-              onclick: () => {
-                setVerdict(it.id, null);
-                render();
-              },
-            },
-            'Clear',
-            h('kbd', {}, 'u'),
-          )
-        : null,
       h(
         'button',
         {
           class: 'btn ghost sm',
-          tip: 'Go to the next item without a ruling (n)',
-          onclick: nextUnreviewed,
+          tip: 'Record this ruling (if open) and go to the next item without one (n)',
+          onclick: () => nextItem(),
         },
         'Next',
         h('kbd', {}, 'n'),
@@ -2687,37 +3282,224 @@ function rulingBar(it: Item, v: Verdict | undefined): HTMLElement {
           {
             class: `vbtn v-${k} ${v?.verdict === k ? 'on' : ''} ${a?.recommendation?.verdict === k ? 'rec' : ''}`,
             'aria-pressed': v?.verdict === k ? 'true' : 'false',
-            tip: tips[k],
+            tip: verdictTip(it, k),
             onclick: () => pickVerdict(it, k),
           },
-          h('span', { class: 'vb-mark' }, v?.verdict === k ? '✓' : ''),
-          h('span', { class: 'vb-label' }, capitalize(verdictLabel(it, k))),
+          h('span', { class: 'vb-label' }, verdictLabel(it, k)),
           h('kbd', {}, key),
         ),
       ),
     ),
-    words && field
-      ? [h('label', { class: 'lbl', for: 'verdict-words' }, fieldCopy(it, field).label), words]
-      : null,
-    v
-      ? h('input', {
-          class: 'field note-field',
-          placeholder: 'Note to the agent (optional)',
-          value: v.note ?? '',
-          oninput: (e: Event) => {
-            v.note = (e.target as HTMLInputElement).value;
-            changed();
+  );
+}
+
+/** The open ruling: one box with its label, what happens next, and an explicit Record. */
+function rulingForm(it: Item, v: Verdict): HTMLElement {
+  const copy = verdictCopy(it, v.verdict);
+  const { field, required } = VERDICT_WORDS[v.verdict];
+  const multi = field === 'wording';
+  const box = h('textarea', {
+    id: 'verdict-words',
+    class: `field ${multi ? 'mono' : ''}`,
+    rows: multi ? Math.min(8, Math.max(3, (v[field] ?? '').split('\n').length + 1)) : 2,
+    placeholder: copy.input.placeholder,
+    'aria-label': copy.input.label,
+    oninput: (e: Event) => {
+      v[field] = (e.target as HTMLTextAreaElement).value;
+      if (S.formError) {
+        S.formError = null;
+        document.getElementById('form-error')?.remove();
+      }
+      changed();
+    },
+    onkeydown: (e: KeyboardEvent) => {
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+        e.preventDefault();
+        recordRuling(it);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        cancelRuling(it);
+      }
+    },
+  }) as HTMLTextAreaElement;
+  box.value = v[field] ?? '';
+  return h(
+    'div',
+    { class: 'ruling-form' },
+    h(
+      'div',
+      { class: 'rf-head' },
+      h('span', { class: `vchip v-${v.verdict}` }, copy.label),
+      h('span', { class: 'rf-next' }, copy.next),
+    ),
+    h(
+      'label',
+      { class: 'lbl', for: 'verdict-words' },
+      copy.input.label,
+      required ? null : h('span', { class: 'muted' }, ' — you can leave it empty'),
+    ),
+    box,
+    S.formError ? h('div', { id: 'form-error', class: 'form-error' }, S.formError) : null,
+    h(
+      'div',
+      { class: 'rf-actions' },
+      h('span', { class: 'meta' }, 'Enter records it · Shift+Enter for a new line · Esc cancels'),
+      h('span', { class: 'grow' }),
+      h('button', { class: 'btn ghost sm', onclick: () => cancelRuling(it) }, 'Cancel'),
+      h(
+        'button',
+        { class: `btn sm record v-${v.verdict}`, onclick: () => recordRuling(it) },
+        'Record ruling',
+        h('kbd', {}, '↵'),
+      ),
+    ),
+  );
+}
+
+/** A recorded ruling, collapsed to what the agent will receive — or, unfinished, what it lacks. */
+function rulingChip(it: Item, v: Verdict, state: 'recorded' | 'unfinished'): HTMLElement {
+  const field = VERDICT_WORDS[v.verdict].field;
+  const words = v[field]?.trim();
+  const just = S.justRecorded === it.id;
+  if (just) S.justRecorded = null;
+  return h(
+    'div',
+    { class: `ruled-chip ${state} ${just ? 'just' : ''}`, role: 'status' },
+    h(
+      'div',
+      { class: 'rc-main' },
+      h(
+        'span',
+        { class: `vchip v-${v.verdict} ${state === 'recorded' ? 'solid' : ''}` },
+        state === 'recorded'
+          ? `✓ Ruled: ${verdictLabel(it, v.verdict)}`
+          : verdictLabel(it, v.verdict),
+      ),
+      state === 'recorded'
+        ? h('span', { id: 'chip-save', class: `chip-save ${S.saved}` })
+        : h(
+            'span',
+            { class: 'warn small' },
+            `Not recorded: ${verdictLabel(it, v.verdict)} needs ${VERDICT_WORDS[v.verdict].field === 'wording' ? 'your wording' : 'its words'}.`,
+          ),
+      h('span', { class: 'grow' }),
+      h(
+        'button',
+        { class: 'btn ghost sm', tip: 'Change this ruling (e)', onclick: () => editRuling(it) },
+        state === 'recorded' ? 'Edit' : 'Finish',
+        h('kbd', {}, 'e'),
+      ),
+      h(
+        'button',
+        {
+          class: 'btn ghost sm',
+          tip: 'Remove this ruling: the item goes back to unreviewed (u)',
+          onclick: () => {
+            setVerdict(it.id, null);
+            render();
           },
-          onkeydown: fieldKeys(blur, blur),
-        })
+        },
+        'Clear',
+        h('kbd', {}, 'u'),
+      ),
+    ),
+    words ? h('div', { class: 'rc-words' }, words) : null,
+    state === 'recorded'
+      ? h('div', { class: 'rc-next meta' }, verdictCopy(it, v.verdict).next)
       : null,
   );
 }
 
+/** An item decided in an earlier pass: what was ruled, and that it is context only. */
+function decidedBar(it: Item): HTMLElement {
+  const d = it.decided as NonNullable<Item['decided']>;
+  return h(
+    'div',
+    { class: 'ruling st-decided', role: 'region', 'aria-label': 'Decided earlier' },
+    h(
+      'div',
+      { class: 'ruled-chip decided' },
+      h(
+        'div',
+        { class: 'rc-main' },
+        h('span', { class: `vchip v-${d.verdict}` }, verdictLabel(it, d.verdict)),
+        h(
+          'span',
+          { class: 'meta' },
+          `decided by ${d.by}, ${d.on}${d.pass ? ` in pass ${d.pass}` : ''} — context only; not ruled again`,
+        ),
+        h('span', { class: 'grow' }),
+        h(
+          'button',
+          { class: 'btn ghost sm', onclick: () => nextItem() },
+          'Next',
+          h('kbd', {}, 'n'),
+        ),
+      ),
+      d.words ? h('div', { class: 'rc-words' }, d.words) : null,
+    ),
+  );
+}
+
 function pickVerdict(it: Item, k: VerdictKind): void {
-  setVerdict(it.id, k);
+  if (it.decided) return;
+  const v = verdictOf(it.id);
+  if (S.editing !== it.id) S.editingFrom = v ? structuredClone(v) : null;
+  if (v?.verdict !== k) setVerdict(it.id, k);
+  S.editing = it.id;
+  S.formError = null;
   render();
-  if (k !== 'accept') setTimeout(() => document.getElementById('verdict-words')?.focus(), 0);
+  setTimeout(() => {
+    const box = document.getElementById('verdict-words') as HTMLTextAreaElement | null;
+    box?.focus();
+    box?.setSelectionRange(box.value.length, box.value.length);
+  }, 0);
+}
+
+function editRuling(it: Item): void {
+  const v = verdictOf(it.id);
+  if (v) pickVerdict(it, v.verdict);
+}
+
+/** Record the open ruling: it locks in, collapses to its chip, and the queue marks it. */
+function recordRuling(it: Item): boolean {
+  const v = verdictOf(it.id);
+  if (!v) return false;
+  if (!isComplete(v)) {
+    S.formError = `${verdictLabel(it, v.verdict)} needs ${verdictCopy(it, v.verdict).input.label.toLowerCase().replace(/ —.*$/, '')}. Write it, or pick another ruling.`;
+    render();
+    document.getElementById('verdict-words')?.focus();
+    return false;
+  }
+  S.editing = null;
+  S.editingFrom = null;
+  S.formError = null;
+  S.justRecorded = it.id;
+  changed();
+  render();
+  return true;
+}
+
+/** Close the form without recording: back to the ruling as it was (or to none). */
+function cancelRuling(it: Item): void {
+  const was = S.editingFrom;
+  S.editing = null;
+  S.editingFrom = null;
+  S.formError = null;
+  const i = S.review.verdicts.findIndex((x) => x.item === it.id);
+  if (was) {
+    if (i === -1) S.review.verdicts.push(was);
+    else S.review.verdicts[i] = was;
+  } else if (i !== -1) S.review.verdicts.splice(i, 1);
+  changed();
+  render();
+}
+
+/** Next: record the open ruling first (a ruling missing its words stops here), then move on. */
+function nextItem(): void {
+  const it = currentItem();
+  if (it && S.editing === it.id && !recordRuling(it)) return;
+  nextUnreviewed();
 }
 
 function nextUnreviewed(): void {
@@ -2725,12 +3507,20 @@ function nextUnreviewed(): void {
   const pos = Math.max(0, order.indexOf(S.current));
   for (let d = 1; d <= order.length; d++) {
     const i = order[(pos + d) % order.length] as number;
-    if (!verdictOf((items()[i] as Item).id)) {
+    const it = items()[i] as Item;
+    if (!it.decided && rulingState(it.id) !== 'recorded') {
       select(i);
       return;
     }
   }
-  toast('Every item has a ruling. Press 4 to review and submit.');
+  toast('Every item has a recorded ruling. Press 5 to review and submit.');
+}
+
+function scrollToOutcomes(): void {
+  const el = document.querySelector<HTMLElement>('.center .outcomes');
+  if (!el) return;
+  el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  flashEls([...el.querySelectorAll<HTMLElement>('.outcome')]);
 }
 
 // The side pane: the files this decision would edit — whole, with the passages in
@@ -2799,7 +3589,13 @@ function sidePane(it: Item): HTMLElement {
             f.passages
               .filter((p) => p.n > 0)
               .sort((a, b) => a.n - b.n)
-              .map((p) => h('span', { class: `pn pn-sm pn-${p.role}` }, String(p.n))),
+              .map((p) =>
+                h(
+                  'span',
+                  { class: `pn pn-sm pn-${p.role}`, tip: passageTip(it, p, 'tab') },
+                  String(p.n),
+                ),
+              ),
           )
         : null,
     );
@@ -2918,7 +3714,7 @@ function sidePane(it: Item): HTMLElement {
           'div',
           { class: 'why-here' },
           h('span', { class: 'callout-label' }, 'Why this is here'),
-          h('span', {}, linked(pf.why, itemCtx(it))),
+          h('span', {}, linked(pf.why, itemCtx(it), whyField(it, pf))),
         )
       : null,
     path && pf
@@ -2982,60 +3778,89 @@ function passageView(it: Item, pf: PaneFile): HTMLElement {
   ];
   const view = fileView(pf.path, { extra: marks });
   for (const p of pf.passages) {
+    const e = p.role === 'edit' ? it.nowWhat?.edits?.[p.edit ?? 0] : undefined;
     decoratePassage(view, p, {
       label: passageLabel(it, p),
       also: p.also.map((a) => shortId(a.item)),
-      diff:
-        p.role === 'edit'
-          ? (() => {
-              const e = it.nowWhat?.edits?.[p.edit ?? 0];
-              return e ? wordDiff(e.before, e.after) : null;
-            })()
-          : null,
+      tip: p.n > 0 ? passageTip(it, p, 'pane') : undefined,
+      diff: e
+        ? editDiff(
+            e.before,
+            e.after,
+            {
+              before: { kind: 'file', path: pf.path, off: p.start },
+              after: { item: it.id, field: `nowWhat.edits[${p.edit ?? 0}].after` },
+            },
+            fileCtx(pf.path),
+          )
+        : null,
     });
   }
   return view;
 }
 
-/** The file with this item's edits applied, the new text marked — read-only (no notes). */
+/**
+ * The file with this item's edits applied, each edit's new wording marked — and, in
+ * the inline diff mode, the words it removes struck through in place. Annotatable:
+ * the text around an edit anchors to the file, the new wording to the edit.
+ */
 function afterView(it: Item, pf: PaneFile): HTMLElement {
   const text = fileText(pf.path) ?? '';
-  const edits = pf.passages.filter((p) => p.role === 'edit').sort((a, b) => a.start - b.start);
-  let out = '';
-  let pos = 0;
-  const spans: { p: Passage; start: number; end: number }[] = [];
-  for (const p of edits) {
-    if (p.start < pos) continue; // overlapping edits within one item: keep the first
+  const edits = pf.passages.filter((p) => p.role === 'edit');
+  const applied = edits.flatMap((p) => {
     const e = it.nowWhat?.edits?.[p.edit ?? 0];
-    if (!e) continue;
-    out += text.slice(pos, p.start);
-    spans.push({ p, start: out.length, end: out.length + e.after.length });
-    out += e.after;
-    pos = p.end;
-  }
-  out += text.slice(pos);
-  const marks: Range[] = spans.map((s) => ({
-    start: s.start,
-    end: s.end,
-    cls: 'pass pass-edit pass-after',
-  }));
+    return e
+      ? [
+          {
+            start: p.start,
+            end: p.end,
+            after: e.after,
+            target: fieldTarget({ item: it.id, field: `nowWhat.edits[${p.edit ?? 0}].after` }),
+            p,
+          },
+        ]
+      : [];
+  });
+  const { view: c, spans } = afterEdits(pf.path, text, applied, S.diff);
+  const marks: Range[] = [
+    ...spans.map((sp) => ({ ...sp, cls: 'pass pass-edit pass-after' })),
+    ...c.pieces
+      .filter((p) => p.cls === 'w-ins' || p.cls === 'w-del')
+      .map((p) => ({ start: p.start, end: p.start + p.text.length, cls: p.cls as string })),
+    ...compositeMarks(c),
+  ];
   const lang = langOf(pf.path);
   const view =
     lang === 'markdown' && !S.raw
-      ? proseView(out, { extra: marks, ctx: fileCtx(pf.path) })
-      : codeView(out, lang, { extra: marks, ctx: fileCtx(pf.path) });
-  for (const s of spans) {
+      ? proseView(c.text, { extra: marks, ctx: fileCtx(pf.path) })
+      : codeView(c.text, lang, { extra: marks, ctx: fileCtx(pf.path) });
+  view.classList.add('after-view');
+  compositeHost(view, c);
+  const sorted = [...applied].sort((x, y) => x.start - y.start);
+  spans.forEach((sp, k) => {
+    const src = sorted[k];
+    if (!src) return;
     decoratePassage(
       view,
-      { ...s.p, start: s.start, end: s.end },
+      { ...src.p, start: sp.start, end: sp.end },
       {
         label: 'After the edit',
         also: [],
+        tip: passageTip(it, src.p, 'pane'),
         diff: null,
       },
     );
-  }
+  });
   return view;
+}
+
+/** Which field the side pane's "why this is here" comes from, so a note on it anchors there. */
+function whyField(it: Item, pf: PaneFile): FieldAt | undefined {
+  const c = (it.context ?? []).findIndex((r) => r.path === pf.path && r.why === pf.why);
+  if (c >= 0) return { item: it.id, field: `context[${c}].why` };
+  const e = it.evidence.findIndex((r) => r.path === pf.path && r.note === pf.why);
+  if (e >= 0) return { item: it.id, field: `evidence[${e}].note` };
+  return undefined;
 }
 
 /**
@@ -3047,7 +3872,7 @@ function afterView(it: Item, pf: PaneFile): HTMLElement {
 function decoratePassage(
   view: HTMLElement,
   p: Passage,
-  o: { label: string; also: string[]; diff: HTMLElement | null },
+  o: { label: string; also: string[]; diff: HTMLElement | null; tip?: string | undefined },
 ): void {
   const blocks = [...view.children].filter(
     (c): c is HTMLElement =>
@@ -3076,8 +3901,15 @@ function decoratePassage(
       contenteditable: 'false',
     },
     p.n > 0
-      ? h('span', { class: `pn pn-${p.role}` }, String(p.n))
-      : h('span', { class: 'pctx' }, 'Context'),
+      ? h('span', { class: `pn pn-${p.role}`, tip: o.tip }, String(p.n))
+      : h(
+          'span',
+          {
+            class: 'pctx',
+            tip: 'Context — a passage in a related file. It is not edited; it is shown for what it says.',
+          },
+          'Context',
+        ),
     h(
       'span',
       { class: 'plabel-body' },
@@ -3103,7 +3935,7 @@ function decoratePassage(
           'div',
           { class: 'callout-label pdiff-head' },
           'Proposed wording for',
-          h('span', { class: 'pn pn-sm pn-edit' }, String(p.n)),
+          h('span', { class: 'pn pn-sm pn-edit', tip: o.tip }, String(p.n)),
         ),
         o.diff,
       ),
@@ -3522,7 +4354,8 @@ function textArea(
 }
 
 function submitView(): HTMLElement {
-  const unreviewed = items().filter((it) => !verdictOf(it.id));
+  const unreviewed = toRule().filter((it) => !verdictOf(it.id));
+  const unfinished = toRule().filter((it) => rulingState(it.id) === 'unfinished');
   const counts = new Map<string, number>();
   for (const v of S.review.verdicts) counts.set(v.verdict, (counts.get(v.verdict) ?? 0) + 1);
   return h(
@@ -3535,7 +4368,7 @@ function submitView(): HTMLElement {
       h(
         'p',
         { class: 'lead' },
-        `${S.review.verdicts.length} of ${items().length} items ruled · ${S.review.annotations.length} notes. Submitting hands everything to the agent, which carries it out and may come back with a smaller packet.`,
+        `${recordedCount()} of ${toRule().length} items ruled · ${S.review.annotations.length} notes. Submitting hands everything to the agent, which carries it out and may come back with a smaller packet.`,
       ),
       counts.size
         ? h(
@@ -3556,14 +4389,24 @@ function submitView(): HTMLElement {
         'div',
         { class: 'rows' },
         items().map((it, i) => {
+          if (it.decided) return null;
           const v = verdictOf(it.id);
-          const words = v ? (v.wording ?? v.why ?? v.ruling ?? v.request ?? '') : '';
+          const words = v ? (v[VERDICT_WORDS[v.verdict].field] ?? '') : '';
+          const st = rulingState(it.id);
           return h(
             'button',
-            { class: `srow ${v ? '' : 'todo'}`, onclick: () => select(i) },
+            {
+              class: `srow ${v ? '' : 'todo'} ${st === 'unfinished' ? 'unfinished' : ''}`,
+              onclick: () => select(i),
+            },
             v
-              ? h('span', { class: `vchip v-${v.verdict}` }, verdictLabel(it, v.verdict))
+              ? h(
+                  'span',
+                  { class: `vchip v-${v.verdict}` },
+                  `${st === 'recorded' ? '✓ ' : ''}${verdictLabel(it, v.verdict)}`,
+                )
               : h('span', { class: 'vchip' }, 'unreviewed'),
+            st === 'unfinished' ? h('span', { class: 'vchip unfinished' }, 'unfinished') : null,
             h(
               'span',
               { class: 'srow-title' },
@@ -3586,6 +4429,13 @@ function submitView(): HTMLElement {
             'p',
             { class: 'muted small' },
             `${unreviewed.length} unreviewed — they stay as they are and come back next time.`,
+          )
+        : null,
+      unfinished.length
+        ? h(
+            'p',
+            { class: 'warn small' },
+            `${unfinished.length} unfinished — a ruling is chosen but missing its words. Finish or clear ${unfinished.length === 1 ? 'it' : 'them'} before submitting.`,
           )
         : null,
       h('h2', {}, `Notes · ${S.review.annotations.length}`),
@@ -3733,25 +4583,30 @@ async function abandon(): Promise<void> {
 
 function helpModal(): HTMLElement | null {
   if (!S.help) return null;
+  const close = () => {
+    S.help = false;
+    render();
+  };
   return h(
     'div',
     {
-      class: 'modal',
-      onclick: () => {
-        S.help = false;
-        render();
+      class: 'modal legend-modal',
+      onmousedown: (e: Event) => {
+        if (e.target === e.currentTarget) close();
       },
     },
     h(
       'div',
-      { class: 'modal-box' },
+      { class: 'modal-box legend-box', role: 'dialog', 'aria-label': 'Legend and keys' },
       h(
         'div',
         { class: 'modal-head' },
-        h('strong', {}, 'Keyboard'),
-        h('span', { class: 'muted small' }, 'More on the home page (1)'),
+        h('strong', {}, 'Legend and keys'),
+        h('span', { class: 'muted small' }, 'Also on the home page (1)'),
+        h('span', { class: 'grow' }),
+        h('button', { class: 'icon-btn', title: 'Close (Esc or ?)', onclick: close }, '×'),
       ),
-      keysTable(),
+      h('div', { class: 'legend-scroll' }, legend(true)),
     ),
   );
 }
@@ -3768,6 +4623,10 @@ function go(v: View): void {
 
 function select(i: number): void {
   if (i < 0 || i >= items().length) return;
+  // Leaving an item closes its form: a complete ruling stays recorded, an incomplete one unfinished.
+  S.editing = null;
+  S.editingFrom = null;
+  S.formError = null;
   S.view = 'queue';
   S.current = i;
   S.side = null;
@@ -3787,6 +4646,7 @@ const scrollMemo = new Map<string, number>();
 function render(): void {
   hidePeek();
   hideToolbar();
+  COMPOSITES.clear();
   for (const el of root.querySelectorAll<HTMLElement>('[data-scroll]')) {
     scrollMemo.set(el.dataset.scroll as string, el.scrollTop);
   }
@@ -3850,6 +4710,17 @@ function render(): void {
 }
 
 function scrollToFocus(): void {
+  const j = S.jump;
+  S.jump = null;
+  if (j && S.view === 'queue') {
+    const el = document.querySelector<HTMLElement>(
+      `.center [data-item="${CSS.escape(j.item)}"][data-field="${CSS.escape(j.field)}"]`,
+    );
+    if (el) {
+      el.scrollIntoView({ block: 'center' });
+      flashEls([el]);
+    }
+  }
   const pane = document.querySelector<HTMLElement>(
     S.view === 'files' ? '.file-center' : '.side-body',
   );
@@ -3905,6 +4776,8 @@ function stepFile(d: number): void {
   if (next) openFile(next);
 }
 
+const it0 = () => (S.view === 'queue' ? currentItem() : undefined);
+
 function onKey(e: KeyboardEvent): void {
   if (S.ended) return;
   const t = e.target as HTMLElement;
@@ -3915,6 +4788,10 @@ function onKey(e: KeyboardEvent): void {
     return;
   }
   if (e.key === 'Escape') {
+    if (S.editing && it0()) {
+      cancelRuling(it0() as Item);
+      return;
+    }
     if (S.help || S.drawer || S.picker) {
       S.help = false;
       S.drawer = false;
@@ -3926,7 +4803,7 @@ function onKey(e: KeyboardEvent): void {
   }
   const it = currentItem();
   const verdict = VERDICT_KEYS.find(([, k]) => k === e.key);
-  if (verdict && S.view === 'queue' && it) {
+  if (verdict && S.view === 'queue' && it && !it.decided) {
     e.preventDefault();
     pickVerdict(it, verdict[0]);
     return;
@@ -3940,12 +4817,19 @@ function onKey(e: KeyboardEvent): void {
   const actions: Record<string, () => void> = {
     j: () => (S.view === 'files' ? stepFile(1) : step(1)),
     k: () => (S.view === 'files' ? stepFile(-1) : step(-1)),
-    n: nextUnreviewed,
+    n: () => (S.view === 'queue' ? nextItem() : nextUnreviewed()),
     u: () => {
-      if (it && S.view === 'queue') {
+      if (it && S.view === 'queue' && !it.decided) {
         setVerdict(it.id, null);
         render();
       }
+    },
+    e: () => {
+      if (it && S.view === 'queue' && verdictOf(it.id)) editRuling(it);
+    },
+    b: () => setDiff(S.diff === 'inline' ? 'split' : 'inline'),
+    Enter: () => {
+      if (it && S.view === 'queue' && S.editing === it.id) recordRuling(it);
     },
     '1': () => go('home'),
     '2': () => go('queue'),
@@ -4004,7 +4888,7 @@ async function boot(): Promise<void> {
     themes: Theme[];
     initial: string | null;
     dir: string | null;
-    prefs: { theme?: string };
+    prefs: { theme?: string; diff?: DiffMode };
   }>('GET', '/api/themes');
   const draft = d.data.draft;
   const packet = p.data.packet;
@@ -4034,7 +4918,10 @@ async function boot(): Promise<void> {
     draftPath: p.data.draftPath,
     review: {
       reviewer: draft?.reviewer || packet.reviewer || '',
-      verdicts: (draft?.verdicts ?? []).filter((v) => packet.items.some((i) => i.id === v.item)),
+      // A version 1 draft's notes beside other verdicts join that verdict's one box.
+      verdicts: upgradeVerdicts(draft?.verdicts ?? []).filter((v) =>
+        packet.items.some((i) => i.id === v.item && !i.decided),
+      ),
       annotations: draft?.annotations ?? [],
     },
     view: 'home',
@@ -4060,10 +4947,16 @@ async function boot(): Promise<void> {
     customThemes: th.data.themes ?? [],
     themeDir: th.data.dir ?? null,
     folds: loadFolds(),
+    diff: th.data.prefs?.diff === 'inline' ? 'inline' : 'split',
+    editing: null,
+    editingFrom: null,
+    formError: null,
+    justRecorded: null,
+    jump: null,
   };
   if (draft?.comment) S.review.comment = draft.comment;
   if (draft?.overall) S.review.overall = draft.overall;
-  S.current = displayOrder()[0] ?? 0;
+  S.current = displayOrder().find((i) => !(items()[i] as Item).decided) ?? displayOrder()[0] ?? 0;
   applyHash();
   document.title = packet.title;
   document.addEventListener('keydown', onKey);

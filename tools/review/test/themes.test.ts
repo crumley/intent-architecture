@@ -9,6 +9,7 @@ const TEXT = [
   'heading',
   'heading-2',
   'xref',
+  'accent-passage',
   'accent',
   'accept',
   'amend',
@@ -45,6 +46,22 @@ describe('built-in themes', () => {
       ).filter(([, , r]) => r < 4.5);
       expect(low).toEqual([]);
       expect(contrast(t.colors['accent-ink'], t.colors.accent)).toBeGreaterThanOrEqual(4.5);
+    },
+  );
+  // Passage numbers must stand out from the headings and the accent they sit beside.
+  test.each(THEMES.map((t) => [t.id, t] as const))(
+    '%s gives passage markers their own colour',
+    (_id, t) => {
+      const rgb = (hex: string) =>
+        [0, 2, 4].map((i) => Number.parseInt(hex.replace('#', '').slice(i, i + 2), 16));
+      const dist = (a: string, b: string) => {
+        const [x, y] = [rgb(a), rgb(b)];
+        return Math.hypot(...x.map((v, i) => v - (y[i] as number)));
+      };
+      const p = t.colors['accent-passage'];
+      for (const other of ['accent', 'heading', 'heading-2', 'xref'] as const) {
+        expect([other, dist(p, t.colors[other]) > 80]).toEqual([other, true]);
+      }
     },
   );
   test('themeCss scopes tokens under the theme id', () => {

@@ -1,4 +1,6 @@
-// Themes are sets of CSS custom properties. Built-ins draw on the Gyokuro theme
+// Themes are sets of CSS custom properties. `accent-passage` colours the passage
+// markers (the numbered badges, their margin rule and tint) apart from the accent and
+// the headings, so a number stands out wherever it is. Built-ins draw on the Gyokuro theme
 // family (its base palettes and syntax colours, plus the "graffiti" neon
 // accents for headings, identifiers, and verdicts) and a plain neutral pair.
 // A custom theme is a JSON file naming a built-in base and overriding any
@@ -21,6 +23,7 @@ export const TOKENS = [
   'heading',
   'heading-2',
   'xref',
+  'accent-passage',
   'focus',
   'focus-line',
   'accept',
@@ -81,6 +84,7 @@ export const THEMES: Theme[] = [
       heading: '#9bf99c',
       'heading-2': '#e5db74',
       xref: '#87ceeb',
+      'accent-passage': '#ff8c42',
       focus: '#4a3d14',
       'focus-line': '#e5db74',
       accept: '#9bf99c',
@@ -128,6 +132,7 @@ export const THEMES: Theme[] = [
       heading: '#ffa54f',
       'heading-2': '#fa8072',
       xref: '#87ceeb',
+      'accent-passage': '#ff79c6',
       focus: '#4a3216',
       'focus-line': '#ffa54f',
       accept: '#9bf99c',
@@ -175,6 +180,7 @@ export const THEMES: Theme[] = [
       heading: '#b8f28f',
       'heading-2': '#9fd3a7',
       xref: '#ffb86b',
+      'accent-passage': '#ffd700',
       focus: '#4a3d14',
       'focus-line': '#ffd700',
       accept: '#5fe08a',
@@ -222,6 +228,7 @@ export const THEMES: Theme[] = [
       heading: '#0d5016',
       'heading-2': '#2d5a30',
       xref: '#a14400',
+      'accent-passage': '#b5179e',
       focus: '#ffe9a8',
       'focus-line': '#d99a00',
       accept: '#176c28',
@@ -269,6 +276,7 @@ export const THEMES: Theme[] = [
       heading: '#1c1e22',
       'heading-2': '#3d4149',
       xref: '#3657c8',
+      'accent-passage': '#a3480a',
       focus: '#fde9c6',
       'focus-line': '#f0b45a',
       accept: '#1a7046',
@@ -316,6 +324,7 @@ export const THEMES: Theme[] = [
       heading: '#e6e7ea',
       'heading-2': '#c5c8ce',
       xref: '#7d9cff',
+      'accent-passage': '#f2a65a',
       focus: '#4a3516',
       'focus-line': '#c98b2e',
       accept: '#4cc38a',

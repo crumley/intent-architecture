@@ -121,23 +121,37 @@ export async function serve(opts: ServeOptions): Promise<ServeHandle> {
           prefs: readPrefs(opts.prefsPath),
         });
       case 'PUT /api/prefs': {
+        // Preferences the page remembers across reviews: the theme and the diff display.
         const body = await readJson(req);
-        const theme = body.ok ? (body.value as { theme?: unknown }).theme : undefined;
-        if (typeof theme !== 'string' || !/^[a-z0-9-]{1,41}$/.test(theme)) {
-          return send(res, 400, { errors: [{ path: 'theme', message: 'a theme id' }] });
+        const v = body.ok ? (body.value as Prefs) : {};
+        const next: Prefs = {};
+        const errors: ValidationError[] = [];
+        if (v.theme !== undefined) {
+          if (typeof v.theme === 'string' && /^[a-z0-9-]{1,41}$/.test(v.theme))
+            next.theme = v.theme;
+          else errors.push({ path: 'theme', message: 'a theme id' });
+        }
+        if (v.diff !== undefined) {
+          if (v.diff === 'inline' || v.diff === 'split') next.diff = v.diff;
+          else errors.push({ path: 'diff', message: '"inline" or "split"' });
+        }
+        if (errors.length || (!next.theme && !next.diff)) {
+          return send(res, 400, {
+            errors: errors.length ? errors : [{ path: '$', message: 'theme or diff' }],
+          });
         }
         if (opts.prefsPath) {
           try {
             mkdirSync(dirname(opts.prefsPath), { recursive: true });
             writeFileAtomic(
               opts.prefsPath,
-              `${JSON.stringify({ ...readPrefs(opts.prefsPath), theme }, null, 2)}\n`,
+              `${JSON.stringify({ ...readPrefs(opts.prefsPath), ...next }, null, 2)}\n`,
             );
           } catch {
             // preferences are a convenience; a read-only home must not break a review
           }
         }
-        return send(res, 200, { theme });
+        return send(res, 200, next);
       }
       case 'GET /api/draft':
         return send(res, 200, readDraft(opts.draft, opts.digest));
@@ -201,11 +215,17 @@ export async function serve(opts: ServeOptions): Promise<ServeHandle> {
   };
 }
 
-function readPrefs(path: string | undefined): { theme?: string } {
+/** What the page may remember between reviews. */
+type Prefs = { theme?: string; diff?: 'inline' | 'split' };
+
+function readPrefs(path: string | undefined): Prefs {
   if (!path) return {};
   try {
-    const v = JSON.parse(readFileSync(path, 'utf8')) as { theme?: unknown };
-    return typeof v.theme === 'string' ? { theme: v.theme } : {};
+    const v = JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
+    const out: Prefs = {};
+    if (typeof v.theme === 'string') out.theme = v.theme;
+    if (v.diff === 'inline' || v.diff === 'split') out.diff = v.diff;
+    return out;
   } catch {
     return {};
   }

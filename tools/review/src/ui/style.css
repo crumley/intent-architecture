@@ -2955,3 +2955,532 @@ details.fold > summary:hover .fold-title {
 .wdiff .mk {
   display: none;
 }
+
+/* ================================================================ 0003: rulings that lock in,
+   notes anywhere, passages in their own colour, two diff modes, the legend.
+   Theme tokens used here: --accent-passage (passage markers, rule, tint) and the
+   verdict tokens; "accept with changes" mixes accept toward amend, so a custom
+   theme needs no new token for it. */
+
+.v-accept-with-changes {
+  --vc: color-mix(in srgb, var(--accept) 62%, var(--amend));
+}
+
+/* passages: their own accent, apart from the headings and the theme accent */
+.pn {
+  color: var(--accent-passage);
+  background: color-mix(in srgb, var(--accent-passage) 14%, var(--surface));
+  border: 1.5px solid var(--accent-passage);
+  cursor: default;
+}
+button.pn {
+  cursor: pointer;
+}
+button.pn:hover {
+  background: color-mix(in srgb, var(--accent-passage) 28%, var(--surface));
+}
+.pn-evidence {
+  border-style: dotted;
+  border-width: 2px;
+}
+.pn-sm.pn-evidence {
+  border-width: 1.5px;
+}
+.stab-nums {
+  color: var(--accent-passage);
+}
+.pass-edit {
+  background: color-mix(in srgb, var(--accent-passage) 16%, transparent);
+}
+.pass-evidence {
+  background: color-mix(in srgb, var(--accent-passage) 9%, transparent);
+}
+.pass-long.pass-edit,
+.pass-long.pass-evidence {
+  background: color-mix(in srgb, var(--accent-passage) 7%, transparent);
+}
+.prose .pblk::after {
+  background: var(--accent-passage);
+}
+.prose .pblk-evidence::after {
+  background: repeating-linear-gradient(
+    to bottom,
+    var(--accent-passage) 0 3px,
+    transparent 3px 6px
+  );
+}
+.codeview .pblk {
+  box-shadow: inset 3px 0 0 var(--accent-passage);
+}
+.pdiff {
+  border-color: color-mix(in srgb, var(--accent-passage) 40%, var(--line));
+}
+@keyframes pass-flash {
+  0% {
+    background-color: color-mix(in srgb, var(--accent-passage) 38%, transparent);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+/* tooltips may run to several lines (a passage marker explains itself) */
+.tip {
+  white-space: pre-line;
+  max-width: 400px;
+}
+
+/* the two diff modes; both keep the source's own line breaks in the DOM (offsets
+   intact) and render a hard-wrap break as the space it is */
+.wdiff.inline,
+.wdiff.split {
+  white-space: normal;
+}
+.wdiff .brk {
+  display: block;
+}
+.wdiff .brk.para {
+  height: 0.55em;
+}
+.wdiff.split {
+  display: grid;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+}
+.dside {
+  padding: 10px 16px 12px;
+}
+.dside + .dside {
+  border-top: 1px dashed var(--line-2);
+}
+.d-before {
+  background: color-mix(in srgb, var(--del-bg) 30%, var(--surface));
+}
+.dlabel {
+  font-size: var(--fs-label);
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  margin-bottom: 2px;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.d-before .dlabel {
+  color: color-mix(in srgb, var(--decline) 70%, var(--muted));
+}
+.d-after .dlabel {
+  color: color-mix(in srgb, var(--accept) 70%, var(--muted));
+}
+.wdiff.split .w-del {
+  text-decoration: none;
+  border-radius: 2px;
+}
+.wdiff .w-ins,
+.wdiff .w-del,
+.after-view .w-ins,
+.after-view .w-del {
+  border-radius: 2px;
+  padding: 0 1px;
+}
+.after-view .w-del {
+  text-decoration: line-through;
+}
+.pdiff .wdiff.split {
+  border: 1px solid var(--line);
+  margin-top: 6px;
+}
+.pdiff .wdiff.split .dside {
+  padding: 8px 12px 10px;
+}
+/* the proposed wording in the pane is text a note can anchor to; its label is not */
+.pdiff .drun {
+  user-select: text;
+  -webkit-user-select: text;
+}
+.subhead-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  max-width: var(--measure);
+}
+.subhead-row .subhead {
+  margin-right: auto;
+}
+
+/* the ruling dock, bottom-anchored: its verdict row is always its last row */
+.center {
+  container-type: inline-size;
+}
+.ruling {
+  display: flex;
+  flex-direction: column;
+  max-height: none;
+  overflow: visible;
+  padding: 10px 32px 12px;
+}
+.ruling-top {
+  max-height: 34vh;
+  overflow: auto;
+  margin-bottom: 8px;
+}
+.ruling-hint {
+  font-size: var(--fs-small);
+  color: var(--ink-2);
+  line-height: 1.5;
+}
+.link-btn {
+  color: var(--xref);
+  font-size: var(--fs-small);
+}
+.link-btn:hover {
+  text-decoration: underline;
+}
+.ruling-head {
+  flex-wrap: nowrap;
+  margin: 0 auto 8px;
+  min-height: 28px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.ruling-state {
+  font-size: var(--fs-meta);
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ruling-state.rs-recorded {
+  color: var(--vc, var(--accept));
+  font-weight: 650;
+}
+.ruling-state.rs-open,
+.ruling-state.rs-unfinished {
+  color: var(--defer);
+  font-weight: 600;
+}
+.verdicts {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 6px;
+}
+.verdicts .vbtn {
+  min-height: 44px;
+  padding: 6px 6px;
+  font-size: 13.5px;
+  line-height: 1.2;
+  text-align: center;
+  gap: 6px;
+}
+.verdicts .vbtn .vb-label {
+  min-width: 0;
+}
+@container (max-width: 700px) {
+  .verdicts {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .ruling {
+    padding: 8px 14px 10px;
+  }
+}
+.ruling-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.rf-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.rf-head .vchip,
+.ruled-chip .vchip,
+.legend .vchip {
+  text-transform: none;
+}
+.rf-next {
+  font-size: var(--fs-small);
+  color: var(--ink-2);
+}
+.ruling-form .lbl {
+  margin: 4px 0 0;
+}
+.ruling-form .field {
+  margin: 0;
+}
+.rf-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.btn.record {
+  background: var(--vc);
+  border-color: var(--vc);
+  color: var(--surface);
+  font-weight: 650;
+}
+.btn.record kbd {
+  background: transparent;
+  color: inherit;
+  border-color: color-mix(in srgb, var(--surface) 50%, transparent);
+}
+.form-error {
+  color: var(--decline);
+  font-size: var(--fs-small);
+  font-weight: 600;
+}
+.ruled-chip {
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--vc, var(--line-2)) 45%, var(--line));
+  border-left: 4px solid var(--vc, var(--line-2));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--vc, var(--surface)) 7%, var(--surface));
+}
+.ruled-chip.unfinished {
+  border-left-color: var(--defer);
+  background: color-mix(in srgb, var(--defer) 8%, var(--surface));
+}
+.ruled-chip.decided {
+  --vc: var(--faint);
+  border-left-style: dashed;
+}
+.rc-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.vchip.solid {
+  background: var(--vc);
+  border-color: var(--vc);
+  color: var(--surface);
+  font-size: 13px;
+  padding: 2px 10px;
+}
+.chip-save {
+  font-size: var(--fs-meta);
+  color: var(--muted);
+}
+.chip-save.saved::before {
+  content: "✓ ";
+  color: var(--accept);
+}
+.chip-save.error {
+  color: var(--decline);
+  font-weight: 650;
+}
+.rc-words {
+  margin-top: 6px;
+  font-size: var(--fs-small);
+  color: var(--ink);
+  white-space: pre-wrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.rc-next {
+  margin-top: 4px;
+}
+@keyframes chip-in {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--vc) 55%, transparent);
+    transform: scale(0.985);
+  }
+  60% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--vc) 0%, transparent);
+    transform: scale(1);
+  }
+  100% {
+    box-shadow: none;
+  }
+}
+.ruled-chip.just {
+  animation: chip-in 0.9s ease-out;
+}
+.ruling.st-decided {
+  padding-top: 10px;
+}
+
+/* the queue: what is recorded, what is open or unfinished, what was decided before */
+.qi .dot[class*="v-"].ds-open,
+.qi .dot[class*="v-"].ds-unfinished {
+  background: transparent;
+  border-color: var(--defer);
+  border-style: dashed;
+}
+.qi .dot[class*="v-"].ds-decided {
+  background: transparent;
+  border-color: var(--faint);
+}
+.qi.qs-decided .qt {
+  color: var(--faint);
+}
+.vchip.unfinished {
+  color: var(--defer);
+  border-color: color-mix(in srgb, var(--defer) 50%, transparent);
+  border-style: dashed;
+}
+.vchip.faint {
+  opacity: 0.6;
+}
+.srow.unfinished {
+  border-color: color-mix(in srgb, var(--defer) 50%, var(--line));
+}
+.callout.decided-note {
+  border-left: 3px dashed var(--faint);
+}
+.ask-decided {
+  cursor: default;
+  opacity: 0.8;
+}
+
+/* a selection that cannot take a note says why */
+.toolbar.why {
+  max-width: 420px;
+  padding: 8px 12px;
+  color: var(--bg);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+/* agent-written text a note can anchor to */
+.field-text .hl,
+.anno .hl {
+  cursor: pointer;
+}
+
+/* header controls */
+.help-btn {
+  min-width: 28px;
+  justify-content: center;
+  font-weight: 700;
+}
+
+/* the legend: home page in full, the ? overlay compact */
+.legend {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px 28px;
+  margin-top: var(--sp-3);
+}
+.legend.compact {
+  gap: 14px 24px;
+}
+.lg-sec:last-child {
+  grid-column: 1 / -1;
+}
+.lg-title {
+  margin: 0 0 6px;
+  font-size: var(--fs-label);
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--heading);
+}
+.lg-row {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  padding: 3px 0;
+  font-size: var(--fs-small);
+  line-height: 1.45;
+  color: var(--ink-2);
+}
+.legend.compact .lg-row {
+  grid-template-columns: 132px minmax(0, 1fr);
+  font-size: 13px;
+}
+.lg-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.lg-steps {
+  margin: 0;
+  padding-left: 18px;
+  font-size: var(--fs-small);
+  color: var(--ink-2);
+  line-height: 1.5;
+}
+.vbtn-sample {
+  font-size: 12px;
+  padding: 1px 8px;
+  border: 1.5px dashed var(--accept);
+  border-radius: 6px;
+  color: var(--accept);
+}
+.swatch-pass {
+  padding: 0 6px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--accent-passage) 16%, transparent);
+  box-shadow: inset 3px 0 0 var(--accent-passage);
+  font-size: 12px;
+}
+.xref-sample {
+  color: var(--xref);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.lg-hl {
+  display: inline-block;
+  width: 14px;
+  height: 12px;
+  border-radius: 2px;
+}
+.legend .keys {
+  font-size: 13px;
+}
+.legend-box {
+  width: min(980px, 94vw);
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.legend-scroll {
+  overflow: auto;
+}
+.modal.legend-modal {
+  padding-top: 6vh;
+}
+@media (max-width: 760px) {
+  .legend {
+    grid-template-columns: 1fr;
+  }
+}
+.ruling > * {
+  width: 100%;
+}
+.ruling-hint .link-btn {
+  margin-left: 6px;
+}
+.legend:not(.compact) {
+  grid-template-columns: 1fr;
+}
+.legend:not(.compact) .lg-row {
+  grid-template-columns: 210px minmax(0, 1fr);
+}
+.w-del + .w-ins,
+.w-ins + .w-del {
+  margin-left: 3px;
+}
+.legend.compact .lg-row {
+  grid-template-columns: 168px minmax(0, 1fr);
+}
+.qmeta {
+  flex-wrap: wrap;
+}
+/* a quoted passage under What wears the passage colour, like its number */
+.excerpt .focus {
+  background: color-mix(in srgb, var(--accent-passage) 13%, transparent);
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--accent-passage) 60%, transparent);
+}
+@media (max-width: 1180px) {
+  .diff-btn .pre {
+    display: none;
+  }
+}

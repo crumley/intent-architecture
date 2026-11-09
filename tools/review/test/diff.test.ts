@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test';
-import { diffWords } from '../src/diff.ts';
+import { describe, expect, test } from 'bun:test';
+import { diffAligned, diffWords } from '../src/diff.ts';
 
 const CASES: [string, string, string, string][] = [
   ['identical', 'a b c', 'a b c', '=a b c'],
@@ -34,4 +34,20 @@ test('reassembles both sides exactly', () => {
       .map((p) => p.text)
       .join(''),
   ).toBe(after);
+});
+
+describe('diffAligned: each side keeps its own text', () => {
+  test('a reflowed sentence is the same, and each side reassembles exactly', () => {
+    const before = 'the seam maps a record\n  to a live session for resume';
+    const after = 'the seam maps a record to a\n  live session for attach and resume';
+    const parts = diffAligned(before, after);
+    expect(parts.map((p) => p.a).join('')).toBe(before);
+    expect(parts.map((p) => p.b).join('')).toBe(after);
+    const changed = parts.filter((p) => p.op !== 'same').map((p) => p.a + p.b);
+    expect(changed).toEqual(['attach and ']);
+  });
+  test('a paragraph break is a change, not whitespace', () => {
+    const parts = diffAligned('one two', 'one\n\ntwo');
+    expect(parts.some((p) => p.op !== 'same')).toBe(true);
+  });
 });
