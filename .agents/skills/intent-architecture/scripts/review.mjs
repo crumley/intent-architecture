@@ -3,7 +3,7 @@
 // repository (`mise run build` there); CI fails if this file differs from a fresh build.
 // The intent review tool: `node review.mjs --help`. Node >= 20, built-in modules only.
 // src/cli.ts
-import { spawn } from "node:child_process";
+import { execFileSync as execFileSync2, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync as existsSync2, mkdirSync as mkdirSync2, readdirSync as readdirSync2, readFileSync as readFileSync3, writeFileSync as writeFileSync2 } from "node:fs";
 import { homedir } from "node:os";
@@ -81,6 +81,132 @@ function locate(text, sel, hint) {
   return { status: "orphaned" };
 }
 
+// src/fields.ts
+var STEP = /^(?:\.?([A-Za-z_][A-Za-z0-9_]*)|\[(\d+)\])/;
+function parseField(path) {
+  if (!path || path.length > 120 || path.startsWith("."))
+    return null;
+  const out = [];
+  let rest = path;
+  while (rest) {
+    const m = STEP.exec(rest);
+    if (!m)
+      return null;
+    out.push(m[1] !== undefined ? m[1] : Number(m[2]));
+    rest = rest.slice(m[0].length);
+  }
+  return out;
+}
+function fieldText(item, path) {
+  const steps = parseField(path);
+  if (!steps)
+    return;
+  let at = item;
+  for (const s of steps) {
+    if (at === null || typeof at !== "object")
+      return;
+    if (typeof s === "number") {
+      if (!Array.isArray(at))
+        return;
+      at = at[s];
+    } else {
+      if (Array.isArray(at) || !Object.hasOwn(at, s))
+        return;
+      at = at[s];
+    }
+  }
+  return typeof at === "string" ? at : undefined;
+}
+
+// src/apply.ts
+var LANDS = ["accept", "accept-with-changes", "amend"];
+var occurrences2 = (text, s) => {
+  const out = [];
+  for (let i = text.indexOf(s);i >= 0 && out.length < 3; i = text.indexOf(s, i + 1))
+    out.push(i);
+  return out;
+};
+var lineAt = (text, at) => text.slice(0, at).split(`
+`).length;
+var shaOf = (ref) => ref?.split("@").pop();
+function checkApply(packet, packetDigest, decisions, read, head) {
+  const byId = new Map(packet.items.map((i) => [i.id, i]));
+  const landing = new Map(decisions.verdicts.filter((v) => LANDS.includes(v.verdict)).map((v) => [v.item, v.verdict]));
+  const edits = [];
+  const check = (item, verdict, e, from) => {
+    const text = read(e.path);
+    if (text === undefined) {
+      edits.push({ item, verdict, path: e.path, from, status: "no-file" });
+      return;
+    }
+    const at = occurrences2(text, e.before);
+    const status = at.length === 0 ? "missing" : at.length > 1 ? "ambiguous" : "ok";
+    const row = { item, verdict, path: e.path, from, status };
+    if (at.length)
+      row.line = lineAt(text, at[0]);
+    edits.push(row);
+  };
+  for (const [id, verdict] of landing) {
+    const it = byId.get(id);
+    if (!it)
+      continue;
+    const composed = composedWith(it, packet.items, landing);
+    if (composed) {
+      for (const e of composed)
+        check(id, verdict, e, "composed");
+      continue;
+    }
+    for (const e of it.nowWhat?.edits ?? [])
+      check(id, verdict, e, "edit");
+  }
+  const notes = decisions.annotations.map((a) => {
+    const t = a.target;
+    if (t.kind === "field") {
+      const it = byId.get(t.item);
+      return {
+        id: a.id,
+        status: it && fieldText(it, t.field) !== undefined ? "agent-text" : "orphaned"
+      };
+    }
+    if (t.kind === "item")
+      return { id: a.id, status: "item-text" };
+    const text = read(t.path);
+    if (text === undefined)
+      return { id: a.id, status: "no-file" };
+    return { id: a.id, status: locate(text, a.selector, a.at?.start).status };
+  });
+  const pRef = packet.repo.ref;
+  const moved = head && pRef ? shaOf(head) !== shaOf(pRef) : null;
+  const digestOk = decisions.packet.digest === packetDigest;
+  const ref = { moved };
+  if (pRef)
+    ref.packet = pRef;
+  if (head)
+    ref.head = head;
+  return {
+    ok: digestOk && edits.every((e) => e.status === "ok") && notes.every((n) => n.status !== "orphaned" && n.status !== "no-file"),
+    digest: { packet: packetDigest, decisions: decisions.packet.digest, match: digestOk },
+    ref,
+    edits,
+    notes
+  };
+}
+function composedWith(it, all, landing) {
+  for (const c of it.nowWhat?.composed ?? []) {
+    if (c.with.every((w) => landing.has(w)))
+      return c.edits;
+  }
+  for (const other of all) {
+    if (other.id === it.id || !landing.has(other.id))
+      continue;
+    for (const c of other.nowWhat?.composed ?? []) {
+      if (c.with.includes(it.id) && c.with.every((w) => w === it.id || landing.has(w)))
+        return c.edits;
+    }
+  }
+  return;
+}
+
 // src/scan.ts
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
@@ -91,12 +217,27 @@ var PACKET_KIND = "intent-review-packet";
 var DECISIONS_KIND = "intent-review-decisions";
 var DRAFT_KIND = "intent-review-draft";
 var PACKET_VERSION = 2;
-var DECISIONS_VERSION = 1;
+var DECISIONS_VERSION = 2;
+var DECISIONS_READ = [1, 2];
 var MODES = ["main", "branch"];
 var isIntentFeedback = (kind) => kind === "if" || kind === "sf";
 var IF_STATUSES = ["pending", "ruled", "adjudicated", "declined"];
 var ATTENTION = ["judgment", "routine"];
-var VERDICTS = ["accept", "amend", "decline", "defer", "revise"];
+var VERDICTS = [
+  "accept",
+  "accept-with-changes",
+  "amend",
+  "revise",
+  "decline",
+  "defer"
+];
+var VERDICTS_V1 = [
+  "accept",
+  "amend",
+  "decline",
+  "defer",
+  "revise"
+];
 var OVERALL = ["approve", "request-changes", "comment"];
 var ANNOTATION_KINDS = [
   "comment",
@@ -106,13 +247,23 @@ var ANNOTATION_KINDS = [
   "mismatch"
 ];
 var CHANGE_STATUSES = ["added", "modified", "deleted", "renamed"];
-var REQUIRED_WORDS = {
-  accept: null,
-  amend: "wording",
-  decline: "why",
-  defer: null,
-  revise: "request"
+var VERDICT_WORDS = {
+  accept: { field: "note", required: false },
+  "accept-with-changes": { field: "instructions", required: true },
+  amend: { field: "wording", required: true },
+  revise: { field: "request", required: true },
+  decline: { field: "why", required: true },
+  defer: { field: "ruling", required: false }
 };
+var WORDS_FIELDS = [
+  "note",
+  "instructions",
+  "wording",
+  "request",
+  "why",
+  "ruling"
+];
+var requiredWords = (v) => VERDICT_WORDS[v].required ? VERDICT_WORDS[v].field : null;
 
 class Checker {
   errors = [];
@@ -151,9 +302,10 @@ class Checker {
   header(v, kind, version) {
     if (v.kind !== kind)
       return this.fail("kind", `must be "${kind}"`);
-    if (v.version !== version) {
+    const known = typeof version === "number" ? [version] : version;
+    if (!known.includes(v.version)) {
       const why = kind === PACKET_KIND && v.version === 1 ? `this is a version 1 packet; this tool reads version ${version}.
-${V1_TO_V2}` : `unsupported version ${JSON.stringify(v.version)}; this tool reads ${version}`;
+${V1_TO_V2}` : `unsupported version ${JSON.stringify(v.version)}; this tool reads ${known.join(" or ")}`;
       return this.fail("version", why);
     }
     return true;
@@ -171,7 +323,7 @@ var V1_TO_V2 = `Version 2 asks every item one question and answers it in three s
     - context[].note            -> context[].why        (now required: why the file is shown)
     - a ruled item gains        ruled: { by, on, ruling }   (status "ruled": confirm the wording)
     - attention is now valid in main mode too; the queue orders by it.
-  The decisions file is unchanged (still version 1). Full reference: references/review-contract.md.`;
+  Full reference: references/review-contract.md.`;
 function done(c, v) {
   return c.errors.length === 0 ? { ok: true, value: v } : { ok: false, errors: c.errors };
 }
@@ -330,6 +482,18 @@ function validatePacket(v) {
         }
         c.string(it.ruled.ruling, `${p}.ruled.ruling`, { nonEmpty: true });
         c.optString(it.ruled.where, `${p}.ruled.where`);
+      }
+      if (it.decided !== undefined && c.object(it.decided, `${p}.decided`)) {
+        c.oneOf(it.decided.verdict, VERDICTS, `${p}.decided.verdict`);
+        c.string(it.decided.by, `${p}.decided.by`, { nonEmpty: true });
+        if (c.string(it.decided.on, `${p}.decided.on`, { nonEmpty: true })) {
+          if (!/^\d{4}-\d{2}-\d{2}/.test(it.decided.on)) {
+            c.fail(`${p}.decided.on`, "must be a date, YYYY-MM-DD");
+          }
+        }
+        c.optString(it.decided.words, `${p}.decided.words`);
+        if (it.decided.pass !== undefined)
+          c.int(it.decided.pass, `${p}.decided.pass`, 1);
       }
       if (it.members !== undefined && c.array(it.members, `${p}.members`)) {
         it.members.forEach((m, j) => {
@@ -523,6 +687,30 @@ function draftQuestion(it) {
       return `What is your ruling on ${t}?`;
   }
 }
+var PROMISED_EDIT = /\b(?:the agent|we|I)\s+(?:(?:would|will|also|then|can)\s+)*(?:makes?|adds?|edits?|updates?|marks?|removes?|rewrites?|amends?)\b(?!\s+(?:the|this|these)\s+edits?\s+(?:as\s+)?(?:shown|above|below))[^.;]{0,40}|\bconsequential edits?\b|\b(?:also|and then)\s+(?:edit|update|amend|rewrite)s?\b[^.;]{0,40}/i;
+function boundaryCut(text, e) {
+  const at = text.indexOf(e.before);
+  if (at < 0 || !e.before)
+    return null;
+  const prev = text[at - 1] ?? `
+`;
+  const next = text[at + e.before.length] ?? `
+`;
+  const first = e.before[0];
+  const last = e.before[e.before.length - 1];
+  const word = /[\p{L}\p{N}_]/u;
+  if (word.test(prev) && word.test(first) || word.test(last) && word.test(next)) {
+    return '"before" starts or ends inside a word — widen it to whole words';
+  }
+  const endsAtBoundary = next === `
+` || /[.!?:;]$/.test(e.before.trimEnd());
+  if (e.after.startsWith(e.before) && e.after.length > e.before.length && !endsAtBoundary) {
+    const rest = text.slice(at + e.before.length).split(`
+`)[0]?.slice(0, 40) ?? "";
+    return `the edit inserts after a "before" that stops mid-sentence (it continues "${rest}…") — extend "before" to the end of the sentence or bullet so the new text lands at a boundary`;
+  }
+  return null;
+}
 function advise(packet) {
   const out = [];
   const text = new Map(packet.files.map((f) => [f.path, f.text]));
@@ -541,6 +729,8 @@ function advise(packet) {
   };
   packet.items.forEach((it, i) => {
     const p = `items[${i}]`;
+    if (it.decided)
+      return;
     if (!it.what && !it.soWhat && !it.nowWhat && !it.changes?.length) {
       out.push({
         path: p,
@@ -594,7 +784,20 @@ function advise(packet) {
     });
     (it.nowWhat?.edits ?? []).forEach((e, j) => {
       verbatim(e.path, e.before, `${p}.nowWhat.edits[${j}].before`, '"before"');
+      const t = text.get(e.path);
+      const cut = t === undefined ? null : boundaryCut(t, e);
+      if (cut)
+        out.push({ path: `${p}.nowWhat.edits[${j}].before`, message: `${it.id}: ${cut}` });
     });
+    for (const k of ["summary", "ifAccepted"]) {
+      const m = PROMISED_EDIT.exec(it.nowWhat?.[k] ?? "");
+      if (m) {
+        out.push({
+          path: `${p}.nowWhat.${k}`,
+          message: `${it.id}: "${m[0]}" — if that is an edit beyond nowWhat.edits, write it as an edit so the human rules on its wording`
+        });
+      }
+    }
     (it.nowWhat?.composed ?? []).forEach((cm, k) => {
       cm.edits.forEach((e, j) => {
         verbatim(e.path, e.before, `${p}.nowWhat.composed[${k}].edits[${j}].before`, '"before"');
@@ -613,6 +816,7 @@ function advise(packet) {
 }
 function checkState(c, v, rules) {
   const { strict, packet } = rules;
+  const v1 = rules.version === 1;
   if (strict)
     c.string(v.reviewer, "reviewer", { nonEmpty: true });
   else
@@ -624,8 +828,7 @@ function checkState(c, v, rules) {
   } else if (v.overall === undefined && strict && packet?.mode === "branch") {
     c.fail("overall", "a branch review needs an overall verdict (approve, request-changes, or comment)");
   }
-  const items = packet ? new Set(packet.items.map((i) => i.id)) : null;
-  const sections = packet ? new Map(packet.items.map((i) => [i.id, new Set(i.sections.map((s) => s.key))])) : null;
+  const byId = packet ? new Map(packet.items.map((i) => [i.id, i])) : null;
   const files = packet ? new Set(packet.files.map((f) => f.path)) : null;
   if (c.array(v.verdicts, "verdicts")) {
     const seen = new Set;
@@ -637,16 +840,30 @@ function checkState(c, v, rules) {
         if (seen.has(x.item))
           c.fail(`${p}.item`, `more than one verdict for "${x.item}"`);
         seen.add(x.item);
-        if (items && !items.has(x.item))
+        const it = byId?.get(x.item);
+        if (byId && !it)
           c.fail(`${p}.item`, `"${x.item}" is not in the packet`);
+        else if (it?.decided) {
+          c.fail(`${p}.item`, `"${x.item}" was decided in an earlier pass; it is context only`);
+        }
       }
-      for (const k of ["wording", "why", "ruling", "request", "note"]) {
+      for (const k of WORDS_FIELDS)
         c.optString(x[k], `${p}.${k}`);
-      }
-      if (c.oneOf(x.verdict, VERDICTS, `${p}.verdict`) && strict) {
-        const need = REQUIRED_WORDS[x.verdict];
+      if (!c.oneOf(x.verdict, v1 ? VERDICTS_V1 : VERDICTS, `${p}.verdict`))
+        return;
+      const kind = x.verdict;
+      const own = VERDICT_WORDS[kind].field;
+      if (strict) {
+        const need = requiredWords(kind);
         if (need && (typeof x[need] !== "string" || x[need].trim() === "")) {
-          c.fail(`${p}.${need}`, `a "${x.verdict}" verdict needs its ${need}`);
+          c.fail(`${p}.${need}`, `${verdictName(kind)} needs its ${need}`);
+        }
+        if (!v1) {
+          for (const k of WORDS_FIELDS) {
+            if (k !== own && typeof x[k] === "string" && x[k].trim() !== "") {
+              c.fail(`${p}.${k}`, `${verdictName(kind)} carries only its ${own}, not ${k}`);
+            }
+          }
         }
       }
     });
@@ -664,21 +881,33 @@ function checkState(c, v, rules) {
       }
       if (c.object(a.target, `${p}.target`)) {
         const t = a.target;
-        if (c.oneOf(t.kind, ["file", "item"], `${p}.target.kind`)) {
+        const kinds = v1 ? ["file", "item"] : ["file", "item", "field"];
+        if (c.oneOf(t.kind, kinds, `${p}.target.kind`)) {
           if (t.kind === "file") {
             if (c.string(t.path, `${p}.target.path`, { nonEmpty: true }) && files) {
               if (!files.has(t.path))
                 c.fail(`${p}.target.path`, `"${t.path}" is not in the packet`);
             }
-          } else {
+          } else if (t.kind === "item") {
             const okItem = c.string(t.item, `${p}.target.item`, { nonEmpty: true });
             const okSec = c.string(t.section, `${p}.target.section`, { nonEmpty: true });
-            if (okItem && okSec && sections) {
-              const keys = sections.get(t.item);
-              if (!keys)
+            if (okItem && okSec && byId) {
+              const it = byId.get(t.item);
+              if (!it)
                 c.fail(`${p}.target.item`, `"${t.item}" is not in the packet`);
-              else if (!keys.has(t.section)) {
+              else if (!it.sections.some((s) => s.key === t.section)) {
                 c.fail(`${p}.target.section`, `"${t.section}" is not a section of "${t.item}"`);
+              }
+            }
+          } else {
+            const okItem = c.string(t.item, `${p}.target.item`, { nonEmpty: true });
+            const okField = c.string(t.field, `${p}.target.field`, { nonEmpty: true });
+            if (okItem && okField && byId) {
+              const it = byId.get(t.item);
+              if (!it)
+                c.fail(`${p}.target.item`, `"${t.item}" is not in the packet`);
+              else if (fieldText(it, t.field) === undefined) {
+                c.fail(`${p}.target.field`, `"${t.field}" names no text in "${t.item}"`);
               }
             }
           }
@@ -694,7 +923,7 @@ function checkState(c, v, rules) {
         c.int(a.at.end, `${p}.at.end`);
         c.int(a.at.line, `${p}.at.line`, 1);
       }
-      if (a.item !== undefined && c.string(a.item, `${p}.item`) && items && !items.has(a.item)) {
+      if (a.item !== undefined && c.string(a.item, `${p}.item`) && byId && !byId.has(a.item)) {
         c.fail(`${p}.item`, `"${a.item}" is not in the packet`);
       }
       const kindOk = c.oneOf(a.kind, ANNOTATION_KINDS, `${p}.kind`);
@@ -710,6 +939,7 @@ function checkState(c, v, rules) {
     });
   }
 }
+var verdictName = (k) => `${/^[aeiou]/.test(k) ? "an" : "a"} "${k}" verdict`;
 function checkPacketRef(c, v) {
   if (!c.object(v, "packet"))
     return;
@@ -732,21 +962,22 @@ function validateDecisions(v, packet) {
   const c = new Checker;
   if (!c.object(v, "$"))
     return done(c, v);
-  if (!c.header(v, DECISIONS_KIND, DECISIONS_VERSION))
+  if (!c.header(v, DECISIONS_KIND, DECISIONS_READ))
     return done(c, v);
   checkPacketRef(c, v.packet);
   c.string(v.submittedAt, "submittedAt", { nonEmpty: true });
-  checkState(c, v, packet ? { strict: true, packet } : { strict: true });
+  const version = v.version;
+  checkState(c, v, packet ? { strict: true, packet, version } : { strict: true, version });
   return done(c, v);
 }
 function validateDraft(v) {
   const c = new Checker;
   if (!c.object(v, "$"))
     return done(c, v);
-  if (!c.header(v, DRAFT_KIND, DECISIONS_VERSION))
+  if (!c.header(v, DRAFT_KIND, DECISIONS_READ))
     return done(c, v);
   checkPacketRef(c, v.packet);
-  checkState(c, v, { strict: false });
+  checkState(c, v, { strict: false, version: v.version });
   return done(c, v);
 }
 function packetRef(packet, digest) {
@@ -787,19 +1018,16 @@ function pick(v, keys) {
   return out;
 }
 function cleanVerdict(v) {
-  const need = REQUIRED_WORDS[v.verdict];
+  const own = VERDICT_WORDS[v.verdict].field;
   const keys = ["item", "verdict"];
-  if (need)
-    keys.push(need);
-  if (v.verdict === "defer" && v.ruling?.trim())
-    keys.push("ruling");
-  if (v.note?.trim())
-    keys.push("note");
+  if (VERDICT_WORDS[v.verdict].required || v[own]?.trim())
+    keys.push(own);
   return pick(v, keys);
 }
 function cleanAnnotation(a) {
   const out = pick(a, ["id", "target", "item", "selector", "at", "kind", "comment", "createdAt"]);
-  out.target = a.target.kind === "file" ? { kind: "file", path: a.target.path } : { kind: "item", item: a.target.item, section: a.target.section };
+  const t = a.target;
+  out.target = t.kind === "file" ? { kind: "file", path: t.path } : t.kind === "item" ? { kind: "item", item: t.item, section: t.section } : { kind: "field", item: t.item, field: t.field };
   out.selector = { exact: a.selector.exact, prefix: a.selector.prefix, suffix: a.selector.suffix };
   if (a.kind === "suggestion" && a.suggestion !== undefined)
     out.suggestion = a.suggestion;
@@ -857,6 +1085,10 @@ function scanMain(root, opts) {
     }
   }
   items.push(...proposedDecisions(tree));
+  if (opts.merged?.length) {
+    const n = settleMerged(items, (p) => tree.read(p), opts.merged);
+    warnings.push(`--merged: ${n} ruled item(s) await a merged change and are offered as settling`);
+  }
   for (const it of items)
     withEntryContext(it, tree, inSnapshot);
   const name = basename(root);
@@ -1228,15 +1460,18 @@ function feedbackItem(f) {
   return { row, item };
 }
 function parseRuled(line) {
-  const m = /ruled by\s+(.+?)\s+(\d{4}-\d{2}-\d{2})\s*(?:\(([^)]*)\))?\s*,?\s*awaiting the intent edit:?\s*([\s\S]*)$/i.exec(line.replace(/`/g, ""));
+  const m = /ruled by\s+(.+?)\s+(?:on\s+)?(\d{4}-\d{2}-\d{2})([\s\S]*?)\bawaiting (?:the |its )?intent edit\b:?\s*([\s\S]*)$/i.exec(line.replace(/`/g, ""));
   if (!m)
     return;
   const ruling = m[4].trim();
   if (!ruling)
     return;
   const out = { by: m[1].trim(), on: m[2], ruling };
-  if (m[3])
-    out.where = m[3].trim();
+  const mid = m[3].trim().replace(/^[,;\s]+|[,;\s]+$/g, "");
+  const paren = /^\(([^()]*)\)$/.exec(mid);
+  const where = paren ? paren[1].trim() : mid.replace(/^\(|\)$/g, "").trim();
+  if (where)
+    out.where = where;
   return out;
 }
 var INLINE_HEAD = /^##\s+(?:intent|spec)[- ]feedback\b/i;
@@ -1563,6 +1798,55 @@ function gitRef(root, ref) {
     return;
   }
 }
+function mergedLink(statusLine, merged) {
+  const tokens = statusLine.match(/\[[^\]]*\]\([^)]*\)|https?:\/\/[^\s)]+|#\d+/g) ?? [];
+  for (const m of merged) {
+    const n = /^#?(\d+)$/.exec(m.trim())?.[1];
+    const hit = tokens.find((t) => n ? new RegExp(`(?:^#|/pull/|/merge_requests/|/pulls/)${n}(?!\\d)`).test(t) : t.includes(m.trim()));
+    if (hit)
+      return hit;
+  }
+  return;
+}
+function settleMerged(items, read, merged) {
+  let n = 0;
+  for (const it of items) {
+    if (!it.ruled || !it.statusLine)
+      continue;
+    const link = mergedLink(it.statusLine, merged);
+    if (!link)
+      continue;
+    const text = read(it.source.path) ?? "";
+    const words = it.statusLine.split(/\s+/).filter(Boolean);
+    const re = new RegExp(words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\s+"));
+    const before = re.exec(text)?.[0];
+    if (!before)
+      continue;
+    const esc = link.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const ruling = it.ruled.ruling.replace(new RegExp(`\\s*\\(?${esc}\\)?`), "").replace(/\s+$/, "").replace(/[.;,]$/, "");
+    const after = `adjudicated — ${link} (${it.ruled.by}'s ruling: ${ruling})`;
+    const sid = shortIdOf(it.id);
+    it.category = "settle";
+    it.attention = "routine";
+    it.question = `Record ${sid} as adjudicated — the intent change it awaited (${link}) has merged?`;
+    it.what = {
+      facts: `The Status reads “${it.statusLine}”. The change it awaits, ${link}, has merged (the agent said so to the scan).`
+    };
+    it.soWhat = {
+      stakes: "Until the Status says adjudicated, every open-items scan offers this item again as ruled-but-pending. The merge was the adjudication act; this records it."
+    };
+    it.nowWhat = {
+      summary: "Flip the Status line to adjudicated, linking the merged change and keeping the ruling in one line.",
+      edits: [{ path: it.source.path, before, after, note: "the Status line" }],
+      ifAccepted: "The item drops out of the open items; the ledger counts it adjudicated.",
+      ifDeclined: "The Status keeps awaiting an edit that has already landed.",
+      recommendation: { verdict: "accept", why: "The intent change merged; this is bookkeeping." }
+    };
+    delete it.ruled;
+    n++;
+  }
+  return n;
+}
 
 // src/server.ts
 import { randomBytes } from "node:crypto";
@@ -1634,18 +1918,34 @@ async function serve(opts) {
         });
       case "PUT /api/prefs": {
         const body = await readJson(req);
-        const theme = body.ok ? body.value.theme : undefined;
-        if (typeof theme !== "string" || !/^[a-z0-9-]{1,41}$/.test(theme)) {
-          return send(res, 400, { errors: [{ path: "theme", message: "a theme id" }] });
+        const v = body.ok ? body.value : {};
+        const next = {};
+        const errors = [];
+        if (v.theme !== undefined) {
+          if (typeof v.theme === "string" && /^[a-z0-9-]{1,41}$/.test(v.theme))
+            next.theme = v.theme;
+          else
+            errors.push({ path: "theme", message: "a theme id" });
+        }
+        if (v.diff !== undefined) {
+          if (v.diff === "inline" || v.diff === "split")
+            next.diff = v.diff;
+          else
+            errors.push({ path: "diff", message: '"inline" or "split"' });
+        }
+        if (errors.length || !next.theme && !next.diff) {
+          return send(res, 400, {
+            errors: errors.length ? errors : [{ path: "$", message: "theme or diff" }]
+          });
         }
         if (opts.prefsPath) {
           try {
             mkdirSync(dirname(opts.prefsPath), { recursive: true });
-            writeFileAtomic(opts.prefsPath, `${JSON.stringify({ ...readPrefs(opts.prefsPath), theme }, null, 2)}
+            writeFileAtomic(opts.prefsPath, `${JSON.stringify({ ...readPrefs(opts.prefsPath), ...next }, null, 2)}
 `);
           } catch {}
         }
-        return send(res, 200, { theme });
+        return send(res, 200, next);
       }
       case "GET /api/draft":
         return send(res, 200, readDraft(opts.draft, opts.digest));
@@ -1718,7 +2018,12 @@ function readPrefs(path) {
     return {};
   try {
     const v = JSON.parse(readFileSync2(path, "utf8"));
-    return typeof v.theme === "string" ? { theme: v.theme } : {};
+    const out = {};
+    if (typeof v.theme === "string")
+      out.theme = v.theme;
+    if (v.diff === "inline" || v.diff === "split")
+      out.diff = v.diff;
+    return out;
   } catch {
     return {};
   }
@@ -1796,6 +2101,7 @@ var TOKENS = [
   "heading",
   "heading-2",
   "xref",
+  "accent-passage",
   "focus",
   "focus-line",
   "accept",
@@ -1845,6 +2151,7 @@ var THEMES = [
       heading: "#9bf99c",
       "heading-2": "#e5db74",
       xref: "#87ceeb",
+      "accent-passage": "#ff8c42",
       focus: "#4a3d14",
       "focus-line": "#e5db74",
       accept: "#9bf99c",
@@ -1892,6 +2199,7 @@ var THEMES = [
       heading: "#ffa54f",
       "heading-2": "#fa8072",
       xref: "#87ceeb",
+      "accent-passage": "#ff79c6",
       focus: "#4a3216",
       "focus-line": "#ffa54f",
       accept: "#9bf99c",
@@ -1939,6 +2247,7 @@ var THEMES = [
       heading: "#b8f28f",
       "heading-2": "#9fd3a7",
       xref: "#ffb86b",
+      "accent-passage": "#ffd700",
       focus: "#4a3d14",
       "focus-line": "#ffd700",
       accept: "#5fe08a",
@@ -1986,6 +2295,7 @@ var THEMES = [
       heading: "#0d5016",
       "heading-2": "#2d5a30",
       xref: "#a14400",
+      "accent-passage": "#b5179e",
       focus: "#ffe9a8",
       "focus-line": "#d99a00",
       accept: "#176c28",
@@ -2033,6 +2343,7 @@ var THEMES = [
       heading: "#1c1e22",
       "heading-2": "#3d4149",
       xref: "#3657c8",
+      "accent-passage": "#a3480a",
       focus: "#fde9c6",
       "focus-line": "#f0b45a",
       accept: "#1a7046",
@@ -2080,6 +2391,7 @@ var THEMES = [
       heading: "#e6e7ea",
       "heading-2": "#c5c8ce",
       xref: "#7d9cff",
+      "accent-passage": "#f2a65a",
       focus: "#4a3516",
       "focus-line": "#c98b2e",
       accept: "#4cc38a",
@@ -2158,13 +2470,15 @@ var USAGE = `intent review tool ${TOOL_VERSION} — review a repository's intent
 
 usage:
   review.mjs scan     --repo <dir> [--out <packet.json>] [--ref <ref>] [--files repo|intent]
-                      [--no-questions] [--no-inline]
+                      [--no-questions] [--no-inline] [--merged <#n,…>]
   review.mjs scan     --repo <dir> --base <ref> [--head <ref>] [--files repo|intent] [--out <packet.json>]
   review.mjs validate (--packet <file> | --decisions <file>)
   review.mjs serve    --packet <file> --out <decisions.json> [--port <n>] [--open] [--theme <id|file.json>]
   review.mjs locate   --decisions <file> --repo <dir> [--packet <file>]
+  review.mjs check-apply --packet <file> --decisions <file> --repo <dir>
 
-exit codes: 0 done · 2 usage error or invalid input · 3 review abandoned · 1 unexpected
+exit codes: 0 done · 2 usage error or invalid input · 3 review abandoned ·
+  4 check-apply found drift (a before no longer in the tree, a note orphaned, a digest mismatch) · 1 unexpected
 
 themes: built-in ${THEMES.map((t) => t.id).join(", ")}; custom themes are JSON files in
   <config>/themes/ (config: $INTENT_REVIEW_CONFIG, else $XDG_CONFIG_HOME/intent-review, else
@@ -2182,12 +2496,13 @@ class InputError extends Error {
 }
 var KNOWN = {
   scan: {
-    values: ["repo", "out", "ref", "base", "head", "files"],
+    values: ["repo", "out", "ref", "base", "head", "files", "merged"],
     switches: ["no-questions", "no-inline"]
   },
   validate: { values: ["packet", "decisions"], switches: [] },
   serve: { values: ["packet", "out", "port", "theme"], switches: ["open"] },
-  locate: { values: ["decisions", "repo", "packet"], switches: [] }
+  locate: { values: ["decisions", "repo", "packet"], switches: [] },
+  "check-apply": { values: ["packet", "decisions", "repo"], switches: [] }
 };
 function parseArgs(argv) {
   const [command, ...rest] = argv;
@@ -2266,6 +2581,8 @@ async function run(argv, io) {
         return await cmdServe(flags, io);
       case "locate":
         return cmdLocate(flags, io);
+      case "check-apply":
+        return cmdCheckApply(flags, io);
       default:
         throw new UsageError(`unknown command "${command}"`);
     }
@@ -2307,6 +2624,12 @@ function cmdScan(flags, io) {
   };
   if (files !== undefined)
     opts.files = files;
+  const merged = str("merged");
+  if (merged !== undefined) {
+    if (base !== undefined)
+      throw new UsageError("--merged is for main mode");
+    opts.merged = merged.split(/[,\s]+/).filter(Boolean);
+  }
   if (base !== undefined)
     opts.base = base;
   if (head !== undefined)
@@ -5336,6 +5659,535 @@ details.fold > summary:hover .fold-title {
 .wdiff .mk {
   display: none;
 }
+
+/* ================================================================ 0003: rulings that lock in,
+   notes anywhere, passages in their own colour, two diff modes, the legend.
+   Theme tokens used here: --accent-passage (passage markers, rule, tint) and the
+   verdict tokens; "accept with changes" mixes accept toward amend, so a custom
+   theme needs no new token for it. */
+
+.v-accept-with-changes {
+  --vc: color-mix(in srgb, var(--accept) 62%, var(--amend));
+}
+
+/* passages: their own accent, apart from the headings and the theme accent */
+.pn {
+  color: var(--accent-passage);
+  background: color-mix(in srgb, var(--accent-passage) 14%, var(--surface));
+  border: 1.5px solid var(--accent-passage);
+  cursor: default;
+}
+button.pn {
+  cursor: pointer;
+}
+button.pn:hover {
+  background: color-mix(in srgb, var(--accent-passage) 28%, var(--surface));
+}
+.pn-evidence {
+  border-style: dotted;
+  border-width: 2px;
+}
+.pn-sm.pn-evidence {
+  border-width: 1.5px;
+}
+.stab-nums {
+  color: var(--accent-passage);
+}
+.pass-edit {
+  background: color-mix(in srgb, var(--accent-passage) 16%, transparent);
+}
+.pass-evidence {
+  background: color-mix(in srgb, var(--accent-passage) 9%, transparent);
+}
+.pass-long.pass-edit,
+.pass-long.pass-evidence {
+  background: color-mix(in srgb, var(--accent-passage) 7%, transparent);
+}
+.prose .pblk::after {
+  background: var(--accent-passage);
+}
+.prose .pblk-evidence::after {
+  background: repeating-linear-gradient(
+    to bottom,
+    var(--accent-passage) 0 3px,
+    transparent 3px 6px
+  );
+}
+.codeview .pblk {
+  box-shadow: inset 3px 0 0 var(--accent-passage);
+}
+.pdiff {
+  border-color: color-mix(in srgb, var(--accent-passage) 40%, var(--line));
+}
+@keyframes pass-flash {
+  0% {
+    background-color: color-mix(in srgb, var(--accent-passage) 38%, transparent);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+/* tooltips may run to several lines (a passage marker explains itself) */
+.tip {
+  white-space: pre-line;
+  max-width: 400px;
+}
+
+/* the two diff modes; both keep the source's own line breaks in the DOM (offsets
+   intact) and render a hard-wrap break as the space it is */
+.wdiff.inline,
+.wdiff.split {
+  white-space: normal;
+}
+.wdiff .brk {
+  display: block;
+}
+.wdiff .brk.para {
+  height: 0.55em;
+}
+.wdiff.split {
+  display: grid;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+}
+.dside {
+  padding: 10px 16px 12px;
+}
+.dside + .dside {
+  border-top: 1px dashed var(--line-2);
+}
+.d-before {
+  background: color-mix(in srgb, var(--del-bg) 30%, var(--surface));
+}
+.dlabel {
+  font-size: var(--fs-label);
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  margin-bottom: 2px;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.d-before .dlabel {
+  color: color-mix(in srgb, var(--decline) 70%, var(--muted));
+}
+.d-after .dlabel {
+  color: color-mix(in srgb, var(--accept) 70%, var(--muted));
+}
+.wdiff.split .w-del {
+  text-decoration: none;
+  border-radius: 2px;
+}
+.wdiff .w-ins,
+.wdiff .w-del,
+.after-view .w-ins,
+.after-view .w-del {
+  border-radius: 2px;
+  padding: 0 1px;
+}
+.after-view .w-del {
+  text-decoration: line-through;
+}
+.pdiff .wdiff.split {
+  border: 1px solid var(--line);
+  margin-top: 6px;
+}
+.pdiff .wdiff.split .dside {
+  padding: 8px 12px 10px;
+}
+/* the proposed wording in the pane is text a note can anchor to; its label is not */
+.pdiff .drun {
+  user-select: text;
+  -webkit-user-select: text;
+}
+.subhead-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  max-width: var(--measure);
+}
+.subhead-row .subhead {
+  margin-right: auto;
+}
+
+/* the ruling dock, bottom-anchored: its verdict row is always its last row */
+.center {
+  container-type: inline-size;
+}
+.ruling {
+  display: flex;
+  flex-direction: column;
+  max-height: none;
+  overflow: visible;
+  padding: 10px 32px 12px;
+}
+.ruling-top {
+  max-height: 34vh;
+  overflow: auto;
+  margin-bottom: 8px;
+}
+.ruling-hint {
+  font-size: var(--fs-small);
+  color: var(--ink-2);
+  line-height: 1.5;
+}
+.link-btn {
+  color: var(--xref);
+  font-size: var(--fs-small);
+}
+.link-btn:hover {
+  text-decoration: underline;
+}
+.ruling-head {
+  flex-wrap: nowrap;
+  margin: 0 auto 8px;
+  min-height: 28px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.ruling-state {
+  font-size: var(--fs-meta);
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ruling-state.rs-recorded {
+  color: var(--vc, var(--accept));
+  font-weight: 650;
+}
+.ruling-state.rs-open,
+.ruling-state.rs-unfinished {
+  color: var(--defer);
+  font-weight: 600;
+}
+.verdicts {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 6px;
+}
+.verdicts .vbtn {
+  min-height: 44px;
+  padding: 6px 6px;
+  font-size: 13.5px;
+  line-height: 1.2;
+  text-align: center;
+  gap: 6px;
+}
+.verdicts .vbtn .vb-label {
+  min-width: 0;
+}
+@container (max-width: 700px) {
+  .verdicts {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .ruling {
+    padding: 8px 14px 10px;
+  }
+}
+.ruling-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.rf-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.rf-head .vchip,
+.ruled-chip .vchip,
+.legend .vchip {
+  text-transform: none;
+}
+.rf-next {
+  font-size: var(--fs-small);
+  color: var(--ink-2);
+}
+.ruling-form .lbl {
+  margin: 4px 0 0;
+}
+.ruling-form .field {
+  margin: 0;
+}
+.rf-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.btn.record {
+  background: var(--vc);
+  border-color: var(--vc);
+  color: var(--surface);
+  font-weight: 650;
+}
+.btn.record kbd {
+  background: transparent;
+  color: inherit;
+  border-color: color-mix(in srgb, var(--surface) 50%, transparent);
+}
+.form-error {
+  color: var(--decline);
+  font-size: var(--fs-small);
+  font-weight: 600;
+}
+.ruled-chip {
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--vc, var(--line-2)) 45%, var(--line));
+  border-left: 4px solid var(--vc, var(--line-2));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--vc, var(--surface)) 7%, var(--surface));
+}
+.ruled-chip.unfinished {
+  border-left-color: var(--defer);
+  background: color-mix(in srgb, var(--defer) 8%, var(--surface));
+}
+.ruled-chip.decided {
+  --vc: var(--faint);
+  border-left-style: dashed;
+}
+.rc-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.vchip.solid {
+  background: var(--vc);
+  border-color: var(--vc);
+  color: var(--surface);
+  font-size: 13px;
+  padding: 2px 10px;
+}
+.chip-save {
+  font-size: var(--fs-meta);
+  color: var(--muted);
+}
+.chip-save.saved::before {
+  content: "✓ ";
+  color: var(--accept);
+}
+.chip-save.error {
+  color: var(--decline);
+  font-weight: 650;
+}
+.rc-words {
+  margin-top: 6px;
+  font-size: var(--fs-small);
+  color: var(--ink);
+  white-space: pre-wrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.rc-next {
+  margin-top: 4px;
+}
+@keyframes chip-in {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--vc) 55%, transparent);
+    transform: scale(0.985);
+  }
+  60% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--vc) 0%, transparent);
+    transform: scale(1);
+  }
+  100% {
+    box-shadow: none;
+  }
+}
+.ruled-chip.just {
+  animation: chip-in 0.9s ease-out;
+}
+.ruling.st-decided {
+  padding-top: 10px;
+}
+
+/* the queue: what is recorded, what is open or unfinished, what was decided before */
+.qi .dot[class*="v-"].ds-open,
+.qi .dot[class*="v-"].ds-unfinished {
+  background: transparent;
+  border-color: var(--defer);
+  border-style: dashed;
+}
+.qi .dot[class*="v-"].ds-decided {
+  background: transparent;
+  border-color: var(--faint);
+}
+.qi.qs-decided .qt {
+  color: var(--faint);
+}
+.vchip.unfinished {
+  color: var(--defer);
+  border-color: color-mix(in srgb, var(--defer) 50%, transparent);
+  border-style: dashed;
+}
+.vchip.faint {
+  opacity: 0.6;
+}
+.srow.unfinished {
+  border-color: color-mix(in srgb, var(--defer) 50%, var(--line));
+}
+.callout.decided-note {
+  border-left: 3px dashed var(--faint);
+}
+.ask-decided {
+  cursor: default;
+  opacity: 0.8;
+}
+
+/* a selection that cannot take a note says why */
+.toolbar.why {
+  max-width: 420px;
+  padding: 8px 12px;
+  color: var(--bg);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+/* agent-written text a note can anchor to */
+.field-text .hl,
+.anno .hl {
+  cursor: pointer;
+}
+
+/* header controls */
+.help-btn {
+  min-width: 28px;
+  justify-content: center;
+  font-weight: 700;
+}
+
+/* the legend: home page in full, the ? overlay compact */
+.legend {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px 28px;
+  margin-top: var(--sp-3);
+}
+.legend.compact {
+  gap: 14px 24px;
+}
+.lg-sec:last-child {
+  grid-column: 1 / -1;
+}
+.lg-title {
+  margin: 0 0 6px;
+  font-size: var(--fs-label);
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--heading);
+}
+.lg-row {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  padding: 3px 0;
+  font-size: var(--fs-small);
+  line-height: 1.45;
+  color: var(--ink-2);
+}
+.legend.compact .lg-row {
+  grid-template-columns: 132px minmax(0, 1fr);
+  font-size: 13px;
+}
+.lg-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.lg-steps {
+  margin: 0;
+  padding-left: 18px;
+  font-size: var(--fs-small);
+  color: var(--ink-2);
+  line-height: 1.5;
+}
+.vbtn-sample {
+  font-size: 12px;
+  padding: 1px 8px;
+  border: 1.5px dashed var(--accept);
+  border-radius: 6px;
+  color: var(--accept);
+}
+.swatch-pass {
+  padding: 0 6px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--accent-passage) 16%, transparent);
+  box-shadow: inset 3px 0 0 var(--accent-passage);
+  font-size: 12px;
+}
+.xref-sample {
+  color: var(--xref);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.lg-hl {
+  display: inline-block;
+  width: 14px;
+  height: 12px;
+  border-radius: 2px;
+}
+.legend .keys {
+  font-size: 13px;
+}
+.legend-box {
+  width: min(980px, 94vw);
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.legend-scroll {
+  overflow: auto;
+}
+.modal.legend-modal {
+  padding-top: 6vh;
+}
+@media (max-width: 760px) {
+  .legend {
+    grid-template-columns: 1fr;
+  }
+}
+.ruling > * {
+  width: 100%;
+}
+.ruling-hint .link-btn {
+  margin-left: 6px;
+}
+.legend:not(.compact) {
+  grid-template-columns: 1fr;
+}
+.legend:not(.compact) .lg-row {
+  grid-template-columns: 210px minmax(0, 1fr);
+}
+.w-del + .w-ins,
+.w-ins + .w-del {
+  margin-left: 3px;
+}
+.legend.compact .lg-row {
+  grid-template-columns: 168px minmax(0, 1fr);
+}
+.qmeta {
+  flex-wrap: wrap;
+}
+/* a quoted passage under What wears the passage colour, like its number */
+.excerpt .focus {
+  background: color-mix(in srgb, var(--accent-passage) 13%, transparent);
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--accent-passage) 60%, transparent);
+}
+@media (max-width: 1180px) {
+  .diff-btn .pre {
+    display: none;
+  }
+}
 </style>
 </head>
 <body>
@@ -5513,17 +6365,187 @@ details.fold > summary:hover .fold-title {
     flush();
     return out;
   }
+  function diffAligned(before, after) {
+    const a = tokenize(before);
+    const b = tokenize(after);
+    const key = (t) => /^\\s+$/.test(t) ? /\\n[ \\t]*\\n/.test(t) ? \`
+
+\` : " " : t;
+    const ka = a.map(key);
+    const kb = b.map(key);
+    let head = 0;
+    while (head < a.length && head < b.length && ka[head] === kb[head])
+      head++;
+    let tail = 0;
+    while (tail < a.length - head && tail < b.length - head && ka[a.length - 1 - tail] === kb[b.length - 1 - tail]) {
+      tail++;
+    }
+    const n = a.length - head - tail;
+    const m = b.length - head - tail;
+    const dp = Array.from({ length: n + 1 }, () => new Uint32Array(m + 1));
+    for (let i2 = n - 1;i2 >= 0; i2--) {
+      const row = dp[i2];
+      const next = dp[i2 + 1];
+      for (let j2 = m - 1;j2 >= 0; j2--) {
+        row[j2] = ka[head + i2] === kb[head + j2] ? next[j2 + 1] + 1 : Math.max(next[j2], row[j2 + 1]);
+      }
+    }
+    const parts = [];
+    const push = (op, x, y) => {
+      const last = parts[parts.length - 1];
+      if (last && last.op === op) {
+        last.a += x;
+        last.b += y;
+      } else
+        parts.push({ op, a: x, b: y });
+    };
+    for (let k = 0;k < head; k++)
+      push("same", a[k], b[k]);
+    let i = 0;
+    let j = 0;
+    while (i < n && j < m) {
+      if (ka[head + i] === kb[head + j]) {
+        push("same", a[head + i], b[head + j]);
+        i++;
+        j++;
+      } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+        push("del", a[head + i++], "");
+      } else {
+        push("ins", "", b[head + j++]);
+      }
+    }
+    while (i < n)
+      push("del", a[head + i++], "");
+    while (j < m)
+      push("ins", "", b[head + j++]);
+    for (let k = tail;k > 0; k--)
+      push("same", a[a.length - k], b[b.length - k]);
+    return cleanupAligned(parts);
+  }
+  function cleanupAligned(parts) {
+    const out = [];
+    let da = "";
+    let ib = "";
+    const flush = () => {
+      if (da)
+        out.push({ op: "del", a: da, b: "" });
+      if (ib)
+        out.push({ op: "ins", a: "", b: ib });
+      da = "";
+      ib = "";
+    };
+    parts.forEach((p, k) => {
+      if (p.op === "del")
+        da += p.a;
+      else if (p.op === "ins")
+        ib += p.b;
+      else {
+        const prev = parts[k - 1];
+        const next = parts[k + 1];
+        const between = prev && next && prev.op !== "same" && next.op !== "same";
+        if (between && /^\\s+$/.test(p.a) && /^\\s+$/.test(p.b)) {
+          da += p.a;
+          ib += p.b;
+        } else {
+          flush();
+          out.push(p);
+        }
+      }
+    });
+    flush();
+    return out;
+  }
+
+  // src/fields.ts
+  var STEP = /^(?:\\.?([A-Za-z_][A-Za-z0-9_]*)|\\[(\\d+)\\])/;
+  function parseField(path) {
+    if (!path || path.length > 120 || path.startsWith("."))
+      return null;
+    const out = [];
+    let rest = path;
+    while (rest) {
+      const m = STEP.exec(rest);
+      if (!m)
+        return null;
+      out.push(m[1] !== undefined ? m[1] : Number(m[2]));
+      rest = rest.slice(m[0].length);
+    }
+    return out;
+  }
+  function fieldText(item, path) {
+    const steps = parseField(path);
+    if (!steps)
+      return;
+    let at = item;
+    for (const s of steps) {
+      if (at === null || typeof at !== "object")
+        return;
+      if (typeof s === "number") {
+        if (!Array.isArray(at))
+          return;
+        at = at[s];
+      } else {
+        if (Array.isArray(at) || !Object.hasOwn(at, s))
+          return;
+        at = at[s];
+      }
+    }
+    return typeof at === "string" ? at : undefined;
+  }
+  var LABELS = [
+    [/^question$/, "the question"],
+    [/^title$/, "the title"],
+    [/^ruled\\.ruling$/, "the earlier ruling"],
+    [/^what\\.facts$/, "What · the facts"],
+    [/^what\\.ranInto$/, "What · what it ran into"],
+    [/^what\\.assumption$/, "What · the assumption"],
+    [/^evidence\\[(\\d+)\\]\\.note$/, "What · note on quote $1"],
+    [/^soWhat\\.stakes$/, "So what · why it matters"],
+    [/^soWhat\\.relations\\[(\\d+)\\]\\.note$/, "So what · relation $1"],
+    [/^nowWhat\\.summary$/, "Now what · summary"],
+    [/^nowWhat\\.edits\\[(\\d+)\\]\\.after$/, "Now what · edit $1, proposed wording"],
+    [/^nowWhat\\.edits\\[(\\d+)\\]\\.before$/, "Now what · edit $1, current wording"],
+    [/^nowWhat\\.edits\\[(\\d+)\\]\\.note$/, "Now what · edit $1, note"],
+    [/^nowWhat\\.composed\\[(\\d+)\\]\\.edits\\[(\\d+)\\]\\.after$/, "Now what · composed wording"],
+    [/^nowWhat\\.composed\\[(\\d+)\\]\\.note$/, "Now what · composed note"],
+    [/^nowWhat\\.ifAccepted$/, "Now what · if accepted"],
+    [/^nowWhat\\.ifDeclined$/, "Now what · if declined"],
+    [/^nowWhat\\.recommendation\\.why$/, "Now what · the agent’s advice"],
+    [/^context\\[(\\d+)\\]\\.why$/, "why a related file is shown"]
+  ];
+  function fieldLabel(path) {
+    for (const [re, label] of LABELS) {
+      const m = re.exec(path);
+      if (m)
+        return label.replace(/\\$(\\d)/g, (_, n) => String(Number(m[Number(n)]) + 1));
+    }
+    return path;
+  }
 
   // src/schema.ts
   var isIntentFeedback = (kind) => kind === "if" || kind === "sf";
   var OVERALL = ["approve", "request-changes", "comment"];
-  var REQUIRED_WORDS = {
-    accept: null,
-    amend: "wording",
-    decline: "why",
-    defer: null,
-    revise: "request"
+  var VERDICT_WORDS = {
+    accept: { field: "note", required: false },
+    "accept-with-changes": { field: "instructions", required: true },
+    amend: { field: "wording", required: true },
+    revise: { field: "request", required: true },
+    decline: { field: "why", required: true },
+    defer: { field: "ruling", required: false }
   };
+  var requiredWords = (v) => VERDICT_WORDS[v].required ? VERDICT_WORDS[v].field : null;
+  function upgradeVerdicts(verdicts) {
+    return verdicts.map((x) => {
+      const own = VERDICT_WORDS[x.verdict]?.field;
+      if (!own || own === "note" || !x.note?.trim())
+        return x;
+      const { note, ...rest } = x;
+      const words = rest[own]?.trim() ? \`\${rest[own]}
+
+\${note}\` : note;
+      return { ...rest, [own]: words };
+    });
+  }
 
   // src/themes.ts
   var TOKENS = [
@@ -5543,6 +6565,7 @@ details.fold > summary:hover .fold-title {
     "heading",
     "heading-2",
     "xref",
+    "accent-passage",
     "focus",
     "focus-line",
     "accept",
@@ -5592,6 +6615,7 @@ details.fold > summary:hover .fold-title {
         heading: "#9bf99c",
         "heading-2": "#e5db74",
         xref: "#87ceeb",
+        "accent-passage": "#ff8c42",
         focus: "#4a3d14",
         "focus-line": "#e5db74",
         accept: "#9bf99c",
@@ -5639,6 +6663,7 @@ details.fold > summary:hover .fold-title {
         heading: "#ffa54f",
         "heading-2": "#fa8072",
         xref: "#87ceeb",
+        "accent-passage": "#ff79c6",
         focus: "#4a3216",
         "focus-line": "#ffa54f",
         accept: "#9bf99c",
@@ -5686,6 +6711,7 @@ details.fold > summary:hover .fold-title {
         heading: "#b8f28f",
         "heading-2": "#9fd3a7",
         xref: "#ffb86b",
+        "accent-passage": "#ffd700",
         focus: "#4a3d14",
         "focus-line": "#ffd700",
         accept: "#5fe08a",
@@ -5733,6 +6759,7 @@ details.fold > summary:hover .fold-title {
         heading: "#0d5016",
         "heading-2": "#2d5a30",
         xref: "#a14400",
+        "accent-passage": "#b5179e",
         focus: "#ffe9a8",
         "focus-line": "#d99a00",
         accept: "#176c28",
@@ -5780,6 +6807,7 @@ details.fold > summary:hover .fold-title {
         heading: "#1c1e22",
         "heading-2": "#3d4149",
         xref: "#3657c8",
+        "accent-passage": "#a3480a",
         focus: "#fde9c6",
         "focus-line": "#f0b45a",
         accept: "#1a7046",
@@ -5827,6 +6855,7 @@ details.fold > summary:hover .fold-title {
         heading: "#e6e7ea",
         "heading-2": "#c5c8ce",
         xref: "#7d9cff",
+        "accent-passage": "#f2a65a",
         focus: "#4a3516",
         "focus-line": "#c98b2e",
         accept: "#4cc38a",
@@ -5859,6 +6888,109 @@ details.fold > summary:hover .fold-title {
   function themeCss(t) {
     const vars = TOKENS.map((k) => \`--\${k}:\${t.colors[k]};\`).join("");
     return \`:root[data-theme="\${t.id}"]{\${vars}color-scheme:\${t.dark ? "dark" : "light"};}\`;
+  }
+
+  // src/ui/composite.ts
+  function composite(pieces) {
+    let at = 0;
+    const out = [];
+    for (const p of pieces) {
+      if (!p.text)
+        continue;
+      out.push({ ...p, start: at });
+      at += p.text.length;
+    }
+    return { text: out.map((p) => p.text).join(""), pieces: out };
+  }
+  var targetKey = (t) => t.kind === "file" ? \`file:\${t.path}\` : t.kind === "item" ? \`item:\${t.item}#\${t.section}\` : \`field:\${t.item}#\${t.field}\`;
+  function mapRange(c, start, end) {
+    const hit = c.pieces.filter((p) => p.target && p.start < end && p.start + p.text.length > start);
+    if (!hit.length)
+      return { ok: false, why: "nothing" };
+    const keys = new Set(hit.map((p) => targetKey(p.target)));
+    if (keys.size > 1) {
+      const seen = new Map;
+      for (const p of hit)
+        seen.set(targetKey(p.target), p.target);
+      return { ok: false, why: "mixed", targets: [...seen.values()] };
+    }
+    const first = hit[0];
+    const last = hit[hit.length - 1];
+    const s = (first.off ?? 0) + Math.max(0, start - first.start);
+    const e = (last.off ?? 0) + Math.min(last.text.length, end - last.start);
+    return { ok: true, target: first.target, start: s, end: e };
+  }
+  function rangesFor(c, target, start, end) {
+    const key = targetKey(target);
+    const out = [];
+    for (const p of c.pieces) {
+      if (!p.target || targetKey(p.target) !== key)
+        continue;
+      const off = p.off ?? 0;
+      const s = Math.max(start, off);
+      const e = Math.min(end, off + p.text.length);
+      if (s < e)
+        out.push({ start: p.start + (s - off), end: p.start + (e - off) });
+    }
+    return out;
+  }
+  function targetsOf(c) {
+    const seen = new Map;
+    for (const p of c.pieces)
+      if (p.target)
+        seen.set(targetKey(p.target), p.target);
+    return [...seen.values()];
+  }
+  var tag = (src, off) => src ? { target: src.target, off: src.off + off } : {};
+  function inlineDiff(before, after, src = {}) {
+    return composite(walk(diffAligned(before, after), (p, _ia, ib) => {
+      if (p.op === "del")
+        return [{ text: p.a, cls: "w-del" }];
+      return [{ text: p.b, cls: p.op === "ins" ? "w-ins" : "w-same", ...tag(src.after, ib) }];
+    }));
+  }
+  function splitDiff(before, after, src = {}) {
+    const parts = diffAligned(before, after);
+    return {
+      before: composite(walk(parts, (p, ia) => p.op === "ins" ? [] : [{ text: p.a, cls: p.op === "del" ? "w-del" : "w-same", ...tag(src.before, ia) }])),
+      after: composite(walk(parts, (p, _ia, ib) => p.op === "del" ? [] : [{ text: p.b, cls: p.op === "ins" ? "w-ins" : "w-same", ...tag(src.after, ib) }]))
+    };
+  }
+  function walk(parts, f) {
+    let ia = 0;
+    let ib = 0;
+    const out = [];
+    for (const p of parts) {
+      out.push(...f(p, ia, ib));
+      ia += p.a.length;
+      ib += p.b.length;
+    }
+    return out;
+  }
+  function afterEdits(path, text, edits, mode) {
+    const file = { kind: "file", path };
+    const pieces = [];
+    const marks = [];
+    let pos = 0;
+    let count = 0;
+    const add = (p) => {
+      pieces.push(p);
+      count += p.text.length;
+    };
+    for (const e of [...edits].sort((x, y) => x.start - y.start)) {
+      if (e.start < pos)
+        continue;
+      add({ text: text.slice(pos, e.start), target: file, off: pos });
+      const from = count;
+      const src = e.target ? { after: { target: e.target, off: 0 } } : {};
+      const run = mode === "inline" ? inlineDiff(text.slice(e.start, e.end), e.after, src) : splitDiff(text.slice(e.start, e.end), e.after, src).after;
+      for (const p of run.pieces)
+        add(p);
+      marks.push({ from, to: count });
+      pos = e.end;
+    }
+    add({ text: text.slice(pos), target: file, off: pos });
+    return { view: composite(pieces), spans: marks.map((m) => ({ start: m.from, end: m.to })) };
   }
 
   // src/ui/highlight.ts
@@ -6475,8 +7607,8 @@ details.fold > summary:hover .fold-title {
   var S;
   var FILES = new Map;
   var IDX = buildIndex([], []);
-  function h(tag, attrs = {}, ...children) {
-    const el = document.createElement(tag);
+  function h(tag2, attrs = {}, ...children) {
+    const el = document.createElement(tag2);
     for (const [k, v] of Object.entries(attrs)) {
       if (v === undefined || v === null || v === false)
         continue;
@@ -6544,12 +7676,36 @@ details.fold > summary:hover .fold-title {
     const n = document.getElementById("session-count");
     if (n)
       n.textContent = String(S.review.verdicts.length + S.review.annotations.length);
+    const chip = document.getElementById("chip-save");
+    if (chip) {
+      chip.textContent = {
+        idle: "in this review",
+        saving: "saving to your draft…",
+        saved: "saved to your draft",
+        error: "NOT saved — the review server did not answer"
+      }[S.saved];
+      chip.className = \`chip-save \${S.saved}\`;
+    }
   }
   var items = () => S.packet.items;
   var currentItem = () => items()[S.current];
   var fileText = (path) => FILES.get(path);
   var verdictOf = (id) => S.review.verdicts.find((v) => v.item === id);
   var itemById = (id) => items().find((i) => i.id === id);
+  var toRule = () => items().filter((i) => !i.decided);
+  function rulingState(id) {
+    const v = verdictOf(id);
+    if (!v)
+      return "none";
+    if (S.editing === id)
+      return "open";
+    return isComplete(v) ? "recorded" : "unfinished";
+  }
+  function isComplete(v) {
+    const need = requiredWords(v.verdict);
+    return !need || Boolean(v[need]?.trim());
+  }
+  var recordedCount = () => toRule().filter((i) => rulingState(i.id) === "recorded").length;
   var KIND_LABEL = {
     if: "Intent feedback",
     sf: "Intent feedback",
@@ -6562,15 +7718,6 @@ details.fold > summary:hover .fold-title {
   var kindLabel = (it) => KIND_LABEL[it.kind] ?? it.kind;
   var isChange = (it) => it.kind === "intent-change" || it.kind === "design-entry" || it.kind === "decision";
   var capitalize = (w) => w.charAt(0).toUpperCase() + w.slice(1);
-  function verdictLabel(it, v) {
-    if (it.ruled && v === "accept")
-      return "confirm";
-    if (isChange(it) && v === "accept")
-      return "approve";
-    if (isChange(it) && v === "decline")
-      return "reject";
-    return v;
-  }
   function shortId(id) {
     const m = /^(\\d{4})-[^/]*\\/[IS]F-(\\d+)$/.exec(id);
     if (m)
@@ -6585,20 +7732,37 @@ details.fold > summary:hover .fold-title {
       return id.split("/").pop();
     return id.length > 40 ? \`…\${id.slice(-38)}\` : id;
   }
+  var STASH = new Map;
   function setVerdict(id, verdict) {
     const i = S.review.verdicts.findIndex((v) => v.item === id);
     if (verdict === null) {
       if (i !== -1)
         S.review.verdicts.splice(i, 1);
+      if (S.editing === id)
+        S.editing = null;
     } else {
-      const next = { ...i === -1 ? {} : S.review.verdicts[i], item: id, verdict };
-      if (verdict === "amend" && !next.wording)
+      const prev = S.review.verdicts[i];
+      const next = { item: id, verdict };
+      const field = VERDICT_WORDS[verdict].field;
+      const prevField = prev ? VERDICT_WORDS[prev.verdict].field : null;
+      const typed = prev && prevField ? prev[prevField] : undefined;
+      if (prevField && typed?.trim())
+        STASH.set(\`\${id}:\${prevField}\`, typed);
+      const kept = STASH.get(\`\${id}:\${field}\`);
+      if (prevField === field)
+        next[field] = typed ?? "";
+      else if (kept !== undefined)
+        next[field] = kept;
+      else if (field === "wording")
         next.wording = amendSeed(id);
+      else if (typed?.trim())
+        next[field] = typed;
       if (i === -1)
         S.review.verdicts.push(next);
       else
         S.review.verdicts[i] = next;
     }
+    S.formError = null;
     changed();
   }
   function amendSeed(id) {
@@ -6608,11 +7772,16 @@ details.fold > summary:hover .fold-title {
   function targetText(t) {
     if (t.kind === "file")
       return fileText(t.path);
-    return itemById(t.item)?.sections.find((s) => s.key === t.section)?.text;
+    const it = itemById(t.item);
+    if (!it)
+      return;
+    if (t.kind === "field")
+      return fieldText(it, t.field);
+    return it.sections.find((s) => s.key === t.section)?.text;
   }
-  var sameTarget = (a, b) => a.kind === "file" ? b.kind === "file" && a.path === b.path : b.kind === "item" && a.item === b.item && a.section === b.section;
+  var sameTarget = (a, b) => targetKey(a) === targetKey(b);
   var annotationsOn = (t) => S.review.annotations.filter((a) => sameTarget(a.target, t));
-  var annotationsForItem = (id) => S.review.annotations.filter((a) => a.target.kind === "item" && a.target.item === id || a.item === id);
+  var annotationsForItem = (id) => S.review.annotations.filter((a) => a.target.kind !== "file" && a.target.item === id || a.item === id);
   var annotationsInFile = (path) => S.review.annotations.filter((a) => a.target.kind === "file" && a.target.path === path);
   function marksFor(t, text) {
     const out = [];
@@ -6628,9 +7797,11 @@ details.fold > summary:hover .fold-title {
     const t = a.target;
     if (t.kind === "file")
       return \`\${t.path}\${a.at ? \`:\${a.at.line}\` : ""}\`;
+    if (t.kind === "field")
+      return \`\${shortId(t.item)} · \${fieldLabel(t.field)}\`;
     const it = itemById(t.item);
     const label = it?.sections.find((s) => s.key === t.section)?.label ?? t.section;
-    return \`\${shortId(t.item)} · \${label}\`;
+    return \`\${shortId(t.item)} · as written · \${label}\`;
   }
   function refRange(r, text) {
     if (r.quote) {
@@ -6726,11 +7897,43 @@ details.fold > summary:hover .fold-title {
     el.dataset.kind = t.kind;
     if (t.kind === "file")
       el.dataset.path = t.path;
-    else {
+    else if (t.kind === "item") {
       el.dataset.item = t.item;
       el.dataset.section = t.section;
+    } else {
+      el.dataset.item = t.item;
+      el.dataset.field = t.field;
     }
     return el;
+  }
+  var COMPOSITES = new Map;
+  var compositeSeq = 0;
+  function compositeHost(el, c) {
+    if (!targetsOf(c).length)
+      return el;
+    const id = \`c\${++compositeSeq}\`;
+    COMPOSITES.set(id, c);
+    el.classList.add("anno");
+    el.dataset.kind = "composite";
+    el.dataset.cid = id;
+    return el;
+  }
+  function compositeMarks(c) {
+    const out = [];
+    for (const t of targetsOf(c)) {
+      const text = targetText(t);
+      if (text === undefined)
+        continue;
+      for (const a of annotationsOn(t)) {
+        const at = locate(text, a.selector, a.at?.start);
+        if (at.status === "orphaned")
+          continue;
+        for (const r of rangesFor(c, t, at.start, at.end)) {
+          out.push({ ...r, cls: \`hl hl-\${a.kind}\`, id: a.id });
+        }
+      }
+    }
+    return out;
   }
   function proseView(text, o = {}) {
     const marks = viewMarks(text, o);
@@ -6825,24 +8028,57 @@ details.fold > summary:hover .fold-title {
       ctx: itemCtx(it)
     });
   }
-  var plainProse = (text, ctx = itemCtx(currentItem())) => proseView(text, { compact: true, ctx });
-  function linked(text, ctx = itemCtx(currentItem())) {
-    const refs = findRefs(text, IDX, ctx);
-    return h("span", {}, segment(text, 0, text.length, refs).map((sg) => spanFor(sg)));
+  var plainProse = (text, ctx = itemCtx(currentItem()), at) => proseView(text, { compact: true, ctx, target: at ? fieldTarget(at) : null });
+  var fieldTarget = (at) => ({ kind: "field", ...at });
+  function linked(text, ctx = itemCtx(currentItem()), at) {
+    const target = at ? fieldTarget(at) : null;
+    const marks = [...findRefs(text, IDX, ctx), ...target ? marksFor(target, text) : []];
+    return annotatable(h("span", { class: target ? "field-text" : undefined }, segment(text, 0, text.length, marks).map((sg) => spanFor(sg))), target);
   }
-  function wordDiff(before, after) {
-    const flow = (t) => t.split(/\\n[ \\t]*\\n/).map((para) => para.replace(/[ \\t]*\\n(?![ \\t]*(?:[-*+]|\\d+\\.|\\||#+)\\s)[ \\t]*/g, " ")).join(\`
-
-\`);
-    const parts = diffWords(flow(before), flow(after));
-    const ops = [];
-    let text = "";
-    for (const d of parts) {
-      ops.push({ start: text.length, end: text.length + d.text.length, cls: \`w-\${d.op}\` });
-      text += d.text;
+  function breakRanges(text) {
+    const out = [];
+    const re = /\\n[ \\t]*\\n[ \\t]*|\\n[ \\t]*(?=(?:[-*+]|\\d+\\.)\\s|#+\\s|\\|)/g;
+    for (let m = re.exec(text);m; m = re.exec(text)) {
+      out.push({
+        start: m.index,
+        end: m.index + m[0].length,
+        cls: /\\n[ \\t]*\\n/.test(m[0]) ? "brk para" : "brk"
+      });
     }
-    const segs = segment(text, 0, text.length, [...ops, ...inlineRanges(text)]);
-    return h("div", { class: "wdiff" }, segs.map((sg) => h("span", { class: sg.cls.join(" ") || undefined }, sg.text)));
+    return out;
+  }
+  function diffRun(c, ctx, cls) {
+    const ranges = [
+      ...c.pieces.map((p) => ({ start: p.start, end: p.start + p.text.length, cls: p.cls ?? "" })),
+      ...inlineRanges(c.text),
+      ...breakRanges(c.text),
+      ...compositeMarks(c),
+      ...ctx ? findRefs(c.text, IDX, ctx) : []
+    ].filter((r) => r.cls || r.id || r.link);
+    const el = h("div", { class: cls }, segment(c.text, 0, c.text.length, ranges).map((sg) => {
+      const span = spanFor(sg);
+      span.dataset.o = String(sg.start);
+      return span;
+    }));
+    return compositeHost(el, c);
+  }
+  function editDiff(before, after, src = {}, ctx) {
+    const b = src.before ? { target: stripOff(src.before), off: src.before.off ?? 0 } : undefined;
+    const a = src.after ? { target: fieldTarget(src.after), off: 0 } : undefined;
+    const sources = { ...b ? { before: b } : {}, ...a ? { after: a } : {} };
+    if (S.diff === "inline") {
+      return h("div", { class: "wdiff inline" }, diffRun(inlineDiff(before, after, sources), ctx, "drun"));
+    }
+    const sp = splitDiff(before, after, sources);
+    return h("div", { class: "wdiff split" }, h("div", { class: "dside d-before" }, h("div", { class: "dlabel", "aria-hidden": "true" }, "Current"), diffRun(sp.before, ctx, "drun")), h("div", { class: "dside d-after" }, h("div", { class: "dlabel", "aria-hidden": "true" }, "Proposed"), diffRun(sp.after, ctx, "drun")));
+  }
+  function stripOff(t) {
+    const { off: _off, ...rest } = t;
+    return rest;
+  }
+  function beforeSource(path, before) {
+    const at = (fileText(path) ?? "").indexOf(before);
+    return at >= 0 ? { kind: "file", path, off: at } : undefined;
   }
   function patchView(change) {
     const lang = langOf(change.path);
@@ -6912,58 +8148,122 @@ details.fold > summary:hover .fold-title {
     }
     return out;
   }
-  function offsetOf(node, offset) {
+  function offsetOf(node, offset, host) {
+    const own = (el) => el.closest(".anno") === host;
     if (node.nodeType === Node.TEXT_NODE) {
       const span = node.parentElement?.closest("[data-o]");
-      return span ? Number(span.dataset.o) + Math.min(offset, node.textContent?.length ?? 0) : null;
+      if (span && own(span)) {
+        return Number(span.dataset.o) + Math.min(offset, node.textContent?.length ?? 0);
+      }
     }
-    const el = node;
-    if (el.dataset?.o !== undefined) {
-      return Number(el.dataset.o) + (offset > 0 ? el.textContent?.length ?? 0 : 0);
+    const at = document.createRange();
+    try {
+      at.setStart(node, offset);
+    } catch {
+      return null;
     }
-    const row = el.closest?.(".blk, .ln");
-    if (row) {
-      const child = row.children[offset];
-      return child?.dataset.o !== undefined ? Number(child.dataset.o) : Number(row.dataset.end);
+    let lastEnd = null;
+    for (const sp of host.querySelectorAll("[data-o]")) {
+      if (!own(sp))
+        continue;
+      if (at.comparePoint(sp, 0) >= 0)
+        return Number(sp.dataset.o);
+      lastEnd = Number(sp.dataset.o) + (sp.textContent?.length ?? 0);
     }
-    if (el.classList?.contains("anno")) {
-      const child = el.children[offset];
-      if (child?.dataset.start)
-        return Number(child.dataset.start);
-      const last = el.lastElementChild;
-      return last ? Number(last.dataset.end) : null;
-    }
-    return null;
+    return lastEnd;
   }
+  function hostName(el) {
+    const k = el.dataset.kind;
+    if (k === "file")
+      return el.dataset.path;
+    if (k === "field")
+      return fieldLabel(el.dataset.field);
+    if (k === "item")
+      return "the item as written";
+    if (k === "composite")
+      return el.closest(".d-before") ? "the current wording" : "the edit";
+    return "this text";
+  }
+  var targetName = (t) => t.kind === "file" ? t.path : t.kind === "field" ? fieldLabel(t.field) : "the item as written";
   function selectionTarget() {
     const sel = window.getSelection();
-    if (!sel || sel.rangeCount === 0 || sel.isCollapsed)
-      return null;
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) {
+      return {
+        ok: false,
+        why: "Select some text first — anything in an item or in a file.",
+        touched: false
+      };
+    }
     const r = sel.getRangeAt(0);
     const host = (n) => (n.nodeType === Node.TEXT_NODE ? n.parentElement : n)?.closest(".anno");
     const a = host(r.startContainer);
-    if (!a || a !== host(r.endContainer))
-      return null;
-    const start = offsetOf(r.startContainer, r.startOffset);
-    const end = offsetOf(r.endContainer, r.endOffset);
-    if (start === null || end === null || end <= start)
-      return null;
-    const target = a.dataset.kind === "file" ? { kind: "file", path: a.dataset.path } : { kind: "item", item: a.dataset.item, section: a.dataset.section };
-    const text = targetText(target) ?? "";
+    const b = host(r.endContainer);
+    if (!a && !b) {
+      return {
+        ok: false,
+        why: "That is the page’s own text (a label, a button, the ruling dock). Notes go on the item’s text, the passages, and the files.",
+        touched: false
+      };
+    }
+    if (!a || !b) {
+      return {
+        ok: false,
+        why: \`The selection runs into the page’s own labels. Select only text inside \${hostName(a ?? b)}.\`,
+        touched: true
+      };
+    }
+    if (a !== b) {
+      return {
+        ok: false,
+        why: \`The selection runs from \${hostName(a)} into \${hostName(b)}; a note anchors to one of them. Select within one.\`,
+        touched: true
+      };
+    }
+    const start = offsetOf(r.startContainer, r.startOffset, a);
+    const end = offsetOf(r.endContainer, r.endOffset, a);
+    if (start === null || end === null || end <= start) {
+      return {
+        ok: false,
+        why: "No text is selected there — only the page’s own markers.",
+        touched: true
+      };
+    }
+    let target;
     let s = start;
     let e = end;
+    if (a.dataset.kind === "composite") {
+      const c = COMPOSITES.get(a.dataset.cid);
+      const m = c ? mapRange(c, start, end) : null;
+      if (!m)
+        return { ok: false, why: "This view changed; select the text again.", touched: true };
+      if (!m.ok) {
+        const why = m.why === "nothing" ? \`That text is what the edit removes — it exists in no file after the edit. To note it, press \${diffKeyHint()}, or select it in the file beside.\` : \`The selection runs across \${(m.targets ?? []).map(targetName).join(" and ")}; a note anchors to one. Select within the edited text or around it.\`;
+        return { ok: false, why, touched: true };
+      }
+      target = m.target;
+      s = m.start;
+      e = m.end;
+    } else if (a.dataset.kind === "file") {
+      target = { kind: "file", path: a.dataset.path };
+    } else if (a.dataset.kind === "field") {
+      target = { kind: "field", item: a.dataset.item, field: a.dataset.field };
+    } else {
+      target = { kind: "item", item: a.dataset.item, section: a.dataset.section };
+    }
+    const text = targetText(target) ?? "";
     while (s < e && /\\s/.test(text[s]))
       s++;
     while (e > s && /\\s/.test(text[e - 1]))
       e--;
     if (e <= s)
-      return null;
+      return { ok: false, why: "Only blank space is selected.", touched: true };
     const p = { target, start: s, end: e };
     const it = currentItem();
     if (S.view === "queue" && it && target.kind === "file")
       p.item = it.id;
-    return p;
+    return { ok: true, p };
   }
+  var diffKeyHint = () => S.diff === "inline" ? "b for before / after (the current wording is then its own block)" : "b";
   var ANN_KEYS = [
     ["comment", "c", "Comment"],
     ["question", "q", "Question"],
@@ -6985,29 +8285,75 @@ details.fold > summary:hover .fold-title {
     "intent-here": "Intent here — say, in your words, what this passage is for: the purpose behind it that is written nowhere else (often code). The agent records it in intent/, or strengthens the slice that should already say it.",
     mismatch: "Mismatch — this does not do what the intent says. The agent works out whether the code or the intent should change, and brings that choice back to you."
   };
-  var VERDICT_TIP = {
-    accept: "Accept — the proposal is right. The agent makes the intent edit as proposed, in its own change for review.",
-    amend: "Amend — right direction, your words. You write the wording; the agent makes the intent edit with it.",
-    decline: "Decline — no change to the intent. Give a one-line why; it is recorded on the item as its disposition.",
-    defer: "Defer — not now. Optionally record your ruling to apply later; otherwise the item simply stays open.",
-    revise: "Revise — send it back. The agent reworks the proposal or analysis as you ask and shows it again next pass."
-  };
-  var CHANGE_TIP = {
-    accept: "Approve — this change is right as it stands.",
-    amend: "Amend — keep the change, in your wording. The agent applies it on the branch.",
-    decline: "Reject — this change should not go in. Say why; the agent reverts or reworks it on the branch.",
-    defer: "Defer — no ruling on this change yet.",
-    revise: "Revise — the agent reworks this change as you ask and brings it back for another look."
-  };
-  var RULED_TIP = {
-    ...VERDICT_TIP,
-    accept: "Confirm — this wording lands your earlier ruling. The agent makes the intent edit as proposed.",
-    amend: "Amend — the ruling stands, the words do not. You write the wording; the agent lands it.",
-    decline: "Decline — no intent edit after all. Give a one-line why; it replaces the recorded ruling."
-  };
-  function tipsFor(it) {
-    return isChange(it) ? CHANGE_TIP : it.ruled ? RULED_TIP : VERDICT_TIP;
+  function verdictCopy(it, k) {
+    const change = isChange(it);
+    const ruled = Boolean(it.ruled);
+    const yes = change ? "Approve" : ruled ? "Confirm" : "Accept";
+    const where = change ? "on the branch" : "in an intent change for review";
+    switch (k) {
+      case "accept":
+        return {
+          label: yes,
+          tip: \`\${yes} — \${ruled ? "this wording lands your earlier ruling" : change ? "this change is right as it stands" : "the proposal is right as shown"}. A note is optional guidance; it never rewrites what lands — to change the wording, use \${yes} with changes. A note that would change what the edit says comes back to you to confirm instead of landing.\`,
+          input: {
+            label: "Note to the agent (optional) — guidance, not new wording",
+            placeholder: "Anything to keep in mind while landing it… (to change the words, use “with changes”)"
+          },
+          next: change ? "Nothing to change: the agent reports the change approved." : \`The agent makes the edit exactly as shown, \${where}.\`
+        };
+      case "accept-with-changes":
+        return {
+          label: \`\${yes} with changes\`,
+          tip: \`\${yes} with changes — yes, land it, but change it first as you say. You describe the change; the agent writes the new wording and lands it. Use Amend to write the words yourself, or Revise to see it again before anything lands.\`,
+          input: {
+            label: "What should change — the agent rewrites it to match",
+            placeholder: "e.g. say what “hygiene” means in practice; keep the headline short…"
+          },
+          next: \`The agent rewrites the edit as you describe and lands it \${where} — you see it in that change, not in another pass.\`
+        };
+      case "amend":
+        return {
+          label: "Amend",
+          tip: "Amend — your exact words. You write the wording (it starts from the proposal); the agent lands it verbatim.",
+          input: {
+            label: change ? "Your exact wording — applied on the branch" : "Your exact wording — landed verbatim",
+            placeholder: "What the text should say…"
+          },
+          next: \`The agent lands your wording, word for word, \${where}.\`
+        };
+      case "revise":
+        return {
+          label: "Revise",
+          tip: "Revise — not yet. Nothing lands; the agent reworks the proposal (or the analysis) as you ask and shows it to you again next pass.",
+          input: {
+            label: "What to rework before you see it again",
+            placeholder: "Rework it so that…"
+          },
+          next: "Nothing lands now. The agent reworks it and brings it back in the next pass."
+        };
+      case "decline":
+        return {
+          label: change ? "Reject" : "Decline",
+          tip: change ? "Reject — this change should not go in. Say why; the agent reverts or reworks it on the branch." : \`Decline — no change to the intent\${ruled ? " after all" : ""}. Say why in a line; it is recorded on the item as its disposition.\`,
+          input: {
+            label: change ? "Why reject it" : "Why not — one line, recorded as the disposition",
+            placeholder: change ? "What is wrong with this change…" : "Why no intent change…"
+          },
+          next: change ? "The agent reverts or reworks the change on the branch." : "No edit. The agent records your why on the item as declined."
+        };
+      default:
+        return {
+          label: "Defer",
+          tip: "Defer — not now. The item stays open. Optionally record a ruling now, to be landed by a later edit.",
+          input: {
+            label: "A ruling to record now (optional)",
+            placeholder: "Leave empty to simply wait; or the ruling a later edit should land…"
+          },
+          next: "The item stays open. A ruling, if you give one, is recorded on it as awaiting its edit."
+        };
+    }
   }
+  var verdictLabel = (it, v) => verdictCopy(it, v).label;
   var VIEW_TIP = {
     home: "Home — what this review is, what you are asked to do, how to work through it, and the keys.",
     queue: "Queue — the items needing your ruling, one at a time, with the intent they touch beside them.",
@@ -7017,11 +8363,12 @@ details.fold > summary:hover .fold-title {
   };
   var editor = null;
   function openEditor(kind) {
-    const p = selectionTarget();
-    if (!p) {
-      toast("Select some text first — in an item, an intent passage, or any file.");
+    const picked = selectionTarget();
+    if (!picked.ok) {
+      toast(picked.why);
       return;
     }
+    const p = picked.p;
     const text = targetText(p.target) ?? "";
     const selector = createSelector(text, p.start, p.end);
     const annotation = {
@@ -7175,12 +8522,19 @@ details.fold > summary:hover .fold-title {
     hideToolbar();
     if (editor || S.ended)
       return;
-    const p = selectionTarget();
+    const picked = selectionTarget();
     const sel = window.getSelection();
-    if (!p || !sel || sel.rangeCount === 0)
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed)
       return;
     const rects = sel.getRangeAt(0).getClientRects();
     const rect = rects[0] ?? sel.getRangeAt(0).getBoundingClientRect();
+    if (!picked.ok) {
+      if (!picked.touched)
+        return;
+      toolbarEl = h("div", { class: "toolbar why", role: "status" }, picked.why);
+      placeNear(toolbarEl, rect, "above");
+      return;
+    }
     toolbarEl = h("div", { class: "toolbar", role: "toolbar", "aria-label": "Add a note" }, ANN_KEYS.map(([k, key, label]) => h("button", {
       class: \`tb k-\${k}\`,
       tip: ANN_TIP[k],
@@ -7405,28 +8759,44 @@ details.fold > summary:hover .fold-title {
   ];
   function header() {
     const p = S.packet;
-    const ruled = S.review.verdicts.length;
-    const total = items().length;
+    const ruled = recordedCount();
+    const total = toRule().length;
+    const unfinished = toRule().filter((i) => rulingState(i.id) === "unfinished").length;
     const sub = p.mode === "branch" && p.change ? \`\${p.change.head.ref} → \${p.change.base.ref} · \${p.change.head.sha.slice(0, 7)}\` : p.repo.ref ?? p.repo.name;
     const theme = allThemes().find((t) => t.id === S.theme);
-    return h("header", { class: "top" }, h("button", { class: "brand", onclick: () => go("home"), tip: "Back to the home page (1)" }, h("div", { class: "title" }, p.title), h("div", { class: "sub" }, h("span", { class: \`mode m-\${p.mode}\` }, p.mode === "branch" ? "Branch review" : "Main"), " ", sub, p.iteration && p.iteration > 1 ? \` · iteration \${p.iteration}\` : "")), h("nav", { class: "tabs", "aria-label": "Views" }, TABS.map(([v, label, key]) => h("button", { class: \`tab \${S.view === v ? "on" : ""}\`, onclick: () => go(v), tip: VIEW_TIP[v] }, label, h("kbd", {}, key)))), h("div", { class: "status" }, h("div", { class: "meter", tip: \`\${ruled} of \${total} items have your ruling\` }, h("div", { class: "track" }, h("div", { class: "bar", style: \`width:\${total ? 100 * ruled / total : 0}%\` })), h("span", {}, \`\${ruled}/\${total}\`)), h("span", { id: "save-state", class: \`save \${S.saved}\` }), h("button", {
+    return h("header", { class: "top" }, h("button", { class: "brand", onclick: () => go("home"), tip: "Back to the home page (1)" }, h("div", { class: "title" }, p.title), h("div", { class: "sub" }, h("span", { class: \`mode m-\${p.mode}\` }, p.mode === "branch" ? "Branch review" : "Main"), " ", sub, p.iteration && p.iteration > 1 ? \` · iteration \${p.iteration}\` : "")), h("nav", { class: "tabs", "aria-label": "Views" }, TABS.map(([v, label, key]) => h("button", { class: \`tab \${S.view === v ? "on" : ""}\`, onclick: () => go(v), tip: VIEW_TIP[v] }, label, h("kbd", {}, key)))), h("div", { class: "status" }, h("div", {
+      class: "meter",
+      tip: \`\${ruled} of \${total} items have a recorded ruling\${unfinished ? \` · \${unfinished} unfinished (chosen, missing words)\` : ""}\`
+    }, h("div", { class: "track" }, h("div", { class: "bar", style: \`width:\${total ? 100 * ruled / total : 0}%\` })), h("span", {}, \`\${ruled}/\${total}\`)), h("span", { id: "save-state", class: \`save \${S.saved}\` }), h("button", {
       class: \`btn ghost sm \${S.drawer ? "on" : ""}\`,
       tip: "This session — every ruling and note so far; jump back to any of them, edit or remove them (p)",
       onclick: toggleDrawer
     }, "Session", h("span", { id: "session-count", class: "count" }, "0")), h("button", {
+      class: "btn ghost sm diff-btn",
+      tip: "How edits are shown: inline (struck and inserted words in one run) or before / after as two blocks (b)",
+      onclick: () => setDiff(S.diff === "inline" ? "split" : "inline")
+    }, h("span", { class: "pre" }, "Diff: "), S.diff === "inline" ? "inline" : "before / after"), h("button", {
       class: \`btn ghost sm theme-btn \${S.picker ? "on" : ""}\`,
       tip: "Theme — choose the colours, or add your own (t)",
       onclick: () => {
         S.picker = !S.picker;
         render();
       }
-    }, h("span", { class: "swatch", style: theme ? swatchStyle(theme) : "" }), theme?.name ?? "Theme")));
+    }, h("span", { class: "swatch", style: theme ? swatchStyle(theme) : "" }), theme?.name ?? "Theme"), h("button", {
+      class: \`btn ghost sm help-btn \${S.help ? "on" : ""}\`,
+      tip: "Legend and keys — what the colours, numbers, and outlines mean (?)",
+      "aria-label": "Legend and keys",
+      onclick: () => {
+        S.help = !S.help;
+        render();
+      }
+    }, "?")));
   }
   var THEME_DOCS = "https://github.com/crumley/intent-architecture/blob/main/.agents/skills/intent-architecture/references/review-themes.md";
   var allThemes = () => [...THEMES, ...S?.customThemes ?? []];
   function swatchStyle(t) {
     const c = t.colors;
-    return \`background:conic-gradient(\${c.accent} 0 25%, \${c.heading} 0 50%, \${c.xref} 0 75%, \${c.surface} 0)\`;
+    return \`background:conic-gradient(\${c.accent} 0 25%, \${c.heading} 0 50%, \${c["accent-passage"]} 0 75%, \${c.surface} 0)\`;
   }
   function injectThemes(list) {
     let el = document.getElementById("theme-css");
@@ -7476,10 +8846,12 @@ details.fold > summary:hover .fold-title {
   function homeView() {
     const p = S.packet;
     const its = items();
-    const count = (f) => its.filter(f).length;
+    const live = (i) => !i.decided;
+    const count = (f) => its.filter((i) => live(i) && f(i)).length;
+    const recorded = (i) => rulingState(i.id) === "recorded";
     const firstOf = (f) => {
       const order = displayOrder();
-      const i = order.find((n) => f(its[n]) && !verdictOf(its[n].id)) ?? order.find((n) => f(its[n]));
+      const i = order.find((n) => live(its[n]) && f(its[n]) && !recorded(its[n])) ?? order.find((n) => live(its[n]) && f(its[n]));
       return i;
     };
     const asks = [
@@ -7519,24 +8891,26 @@ details.fold > summary:hover .fold-title {
         (i) => !isIntentFeedback(i.kind) && !["question", "decision", "intent-change", "design-entry"].includes(i.kind)
       ]
     ];
-    const ruled = S.review.verdicts.length;
-    const next = displayOrder().find((n) => !verdictOf(its[n].id));
+    const ruled = recordedCount();
+    const next = displayOrder().find((n) => live(its[n]) && !recorded(its[n]));
+    const decided = its.filter((i) => i.decided).length;
     const intro = p.mode === "branch" && p.change ? p.change.summary : p.intro;
     return h("main", { class: "page home", "data-scroll": "home" }, h("div", { class: "page-inner narrow" }, h("div", { class: "eyebrow" }, p.mode === "branch" ? "Branch review" : "Review of the main line"), h("h1", { class: "home-title" }, p.title), h("p", { class: "lead" }, p.mode === "branch" && p.change ? \`What \${p.change.head.ref} does to the intent and design, measured against \${p.change.base.ref} — so you can decide before it merges. Rule on each change, then give the branch an overall verdict.\` : "Everything in this repository that is waiting on a human decision: rule on each item, note anything you see along the way, then hand it back. An agent prepared this and carries out what you decide."), intro || p.change?.recommendation ? h("div", { class: "rec-card" }, h("div", { class: "rec-head" }, h("span", { class: "eyebrow" }, "The agent’s overview"), p.change?.recommendation ? h("span", { class: \`vchip big o-\${p.change.recommendation.verdict}\` }, p.change.recommendation.verdict) : null), intro ? plainProse(intro, {}) : null, p.change?.recommendation ? h("p", { class: "rec-why" }, p.change.recommendation.why) : null) : null, h("h2", {}, "What you are asked to do"), h("div", { class: "asks" }, asks.filter(([, , f]) => count(f) > 0).map(([label, desc, f]) => {
       const n = count(f);
-      const done = its.filter((i) => f(i) && verdictOf(i.id)).length;
+      const done = its.filter((i) => live(i) && f(i) && recorded(i)).length;
       const first = firstOf(f);
       return h("button", { class: "ask", onclick: () => first !== undefined && select(first) }, h("span", { class: "ask-n" }, String(n)), h("span", { class: "ask-body" }, h("strong", {}, label), h("span", { class: "muted small" }, desc)), h("span", { class: "ask-done small muted" }, done ? \`\${done} ruled\` : ""));
-    }), p.mode === "branch" ? h("button", { class: "ask", onclick: () => go("submit") }, h("span", { class: "ask-n" }, "1"), h("span", { class: "ask-body" }, h("strong", {}, "Overall verdict"), h("span", { class: "muted small" }, "Approve, request changes, or comment — given on Review & submit.")), h("span", { class: "ask-done small muted" }, S.review.overall ? S.review.overall.verdict : "")) : null), h("div", { class: "row cta" }, h("button", {
+    }), decided ? h("div", { class: "ask ask-decided" }, h("span", { class: "ask-n" }, String(decided)), h("span", { class: "ask-body" }, h("strong", {}, "Decided last time — context only"), h("span", { class: "muted small" }, "Your rulings from an earlier pass, kept in the queue to read beside the rest. They are not ruled again.")), h("span", { class: "ask-done small muted" }, "")) : null, p.mode === "branch" ? h("button", { class: "ask", onclick: () => go("submit") }, h("span", { class: "ask-n" }, "1"), h("span", { class: "ask-body" }, h("strong", {}, "Overall verdict"), h("span", { class: "muted small" }, "Approve, request changes, or comment — given on Review & submit.")), h("span", { class: "ask-done small muted" }, S.review.overall ? S.review.overall.verdict : "")) : null), h("div", { class: "row cta" }, h("button", {
       class: "btn primary big",
       onclick: () => next !== undefined ? select(next) : go("submit")
-    }, ruled === 0 ? "Start reviewing →" : next !== undefined ? "Continue reviewing →" : "Review & submit →"), h("span", { class: "muted small" }, \`\${ruled} of \${its.length} ruled · \${S.review.annotations.length} notes · your work saves as you go\`)), h("h2", {}, "How to go through it"), h("ol", { class: "steps" }, h("li", {}, h("strong", {}, "Work the queue. "), "Each item asks you one question, then answers it in three stages: What (the facts — the passages quoted, what the build ran into, the assumption it made), So what (why it matters, and which other items it touches), and Now what (the proposed edits, what each choice leads to, and — last — the agent’s advice). Routine items fold the first two stages to a line."), h("li", {}, h("strong", {}, "Read the passages beside it. "), "The right-hand pane shows the files the decision would edit, whole, with each passage in question marked, numbered to match the middle (1, 2…), and the proposed wording shown in place. Files shown only for context sit apart, each saying why it is there. Click any path in the middle, or use [ and ], to jump between passages."), h("li", {}, h("strong", {}, "Rule at the foot of the item. "), "The consequences of each choice sit above the five rulings, so an obvious call takes no scrolling. Hover any ruling to see exactly what it asks of the agent."), h("li", {}, h("strong", {}, "Note anything, anywhere. "), "Select text — in an item, in the intent, in code — and a small toolbar offers five kinds of note."), h("li", {}, h("strong", {}, "Follow the identifiers. "), "Intent-feedback ids like IF-005 (and the older SF-005), entry numbers like 0031, ADRs, and file paths are links: hover to peek, click to go."), h("li", {}, h("strong", {}, "Hand it back. "), "On Review & submit, check the list and submit. The agent carries everything out and may come back with a smaller packet.")), h("h2", {}, "The views"), h("div", { class: "cards3" }, TABS.filter(([v]) => v !== "home").map(([v, label, key]) => h("button", { class: "card view-card", onclick: () => go(v) }, h("div", { class: "row" }, h("strong", {}, label), h("kbd", {}, key)), h("p", { class: "small muted" }, VIEW_TIP[v].replace(/^[^—]+— /, ""))))), h("h2", {}, "Your rulings"), h("dl", { class: "defs" }, VERDICT_KEYS.map(([k, key]) => [
-      h("dt", {}, h("span", { class: \`vchip v-\${k}\` }, k), h("kbd", {}, key)),
-      h("dd", {}, VERDICT_TIP[k].replace(/^[^—]+— /, ""))
-    ])), h("h2", {}, "Kinds of note"), h("dl", { class: "defs" }, ANN_KEYS.map(([k, key, label]) => [
-      h("dt", {}, h("span", { class: \`pill k-\${k}\` }, label), h("kbd", {}, key)),
-      h("dd", {}, ANN_TIP[k].replace(/^[^—]+— /, ""))
-    ])), h("h2", {}, "Keyboard"), keysTable()));
+    }, ruled === 0 ? "Start reviewing →" : next !== undefined ? "Continue reviewing →" : "Review & submit →"), h("span", { class: "muted small" }, \`\${ruled} of \${toRule().length} ruled · \${S.review.annotations.length} notes · your work saves as you go\`)), h("h2", {}, "How to go through it"), h("ol", { class: "steps" }, h("li", {}, h("strong", {}, "Work the queue. "), "Each item asks you one question, then answers it in three stages: What (the facts — the passages quoted, what the build ran into, the assumption it made), So what (why it matters, and which other items it touches), and Now what (the proposed edits, what each choice leads to, and — last — the agent’s advice). Routine items fold the first two stages to a line."), h("li", {}, h("strong", {}, "Read the passages beside it. "), "The right-hand pane shows the files the decision would edit, whole, with each passage in question marked, numbered to match the middle (1, 2…), and the proposed wording shown in place. Files shown only for context sit apart, each saying why it is there. Click any path in the middle, or use [ and ], to jump between passages."), h("li", {}, h("strong", {}, "Rule at the foot of the item. "), "Pick one of six rulings. Each opens one box with a label saying what to write, and a line saying what the agent will do next. Enter (or Record) records it: the box collapses to a ✓ chip, the queue marks the item, and the draft saves. Edit it any time. What each choice leads to is under Now what."), h("li", {}, h("strong", {}, "Note anything, anywhere. "), "Select text — the question, What, an edit’s wording, a passage, any file, code — and a small toolbar offers five kinds of note. If a selection cannot take a note, the toolbar says why."), h("li", {}, h("strong", {}, "Follow the identifiers. "), "Intent-feedback ids like IF-005 (and the older SF-005), entry numbers like 0031, ADRs, and file paths are links: hover to peek, click to go."), h("li", {}, h("strong", {}, "Hand it back. "), "On Review & submit, check the list and submit. The agent carries everything out and may come back with a smaller packet.")), h("h2", {}, "The views"), h("div", { class: "cards3" }, TABS.filter(([v]) => v !== "home").map(([v, label, key]) => h("button", { class: "card view-card", onclick: () => go(v) }, h("div", { class: "row" }, h("strong", {}, label), h("kbd", {}, key)), h("p", { class: "small muted" }, VIEW_TIP[v].replace(/^[^—]+— /, ""))))), h("h2", { id: "legend" }, "Legend"), legend(false)));
+  }
+  function legend(compact) {
+    const it = currentItem() ?? items()[0];
+    const sample = (cls, text, tip) => h("span", { class: cls, tip }, text);
+    const row = (mark, text) => h("div", { class: "lg-row" }, h("span", { class: "lg-mark" }, mark), h("span", {}, text));
+    const sec = (title, ...body) => h("section", { class: "lg-sec" }, h("h3", { class: "lg-title" }, title), body);
+    return h("div", { class: \`legend \${compact ? "compact" : ""}\` }, sec("What to do", h("ol", { class: "lg-steps" }, h("li", {}, "Open an item (2, or j / k). Read the question, then What, So what, Now what."), h("li", {}, "Check the numbered passages beside it — click a number, or [ and ]."), h("li", {}, "Rule at the foot: pick one, write in its one box, press Enter. A ✓ chip means it is recorded."), h("li", {}, "Select any text to leave a note. Then Review & submit (5)."))), sec("Rulings", VERDICT_KEYS.map(([k, key]) => row([h("span", { class: \`vchip v-\${k}\` }, it ? verdictLabel(it, k) : k), h("kbd", {}, key)], it ? verdictCopy(it, k).next : "")), row(sample("vbtn-sample rec", "Dashed"), "The ruling the agent recommends — advice only."), row(sample("vchip solid v-accept", "✓ Ruled"), "Recorded: what the agent will receive. Edit (e) or clear (u) it any time."), row(sample("vchip unfinished", "unfinished"), "Chosen but missing its words — kept in the draft, not recorded.")), sec("Passages and marks", row(sample("pn pn-edit", "1"), "A passage this item would edit. Solid outline. Same number in the middle and beside."), row(sample("pn pn-evidence", "2"), "Evidence quoted under What — not edited. Dotted outline."), row(sample("pctx", "Context"), "A passage in a related file, shown for what it says; not edited."), row(sample("plabel-also", "⚠"), "Another item edits the same passage; the callout says what lands if you accept both."), row(sample("swatch-pass", "tint"), "The passages in question carry the passage colour: marker, margin rule, and tint.")), sec("Badges and colours", row(sample("tag at-judgment", "needs judgment"), "Reasonable people differ: read it all."), row(sample("tag at-routine", "routine"), "Bookkeeping or a wording fix; What and So what fold to a line."), row(sample("tag ruled", "ruled"), "Already ruled earlier: this pass confirms the wording."), row([sample("w-del", "removed"), " ", sample("w-ins", "added")], "Words an edit removes and adds (b switches inline / before and after)."), row(sample("xref-sample", "IF-005"), "An identifier or path: hover to peek, click to go."), row(ANN_KEYS.map(([k]) => h("span", { class: \`hl hl-\${k} lg-hl\` }, " ")), "Your notes, tinted by kind: comment, question, suggestion, intent here, mismatch.")), sec("Notes on selected text", ANN_KEYS.map(([k, key, label]) => row([h("span", { class: \`pill k-\${k}\` }, label), h("kbd", {}, key)], ANN_TIP[k].replace(/^[^—]+— /, "").split(". ")[0]))), sec("Keys", keysTable()));
   }
   function keysTable() {
     const rows = [
@@ -7544,14 +8918,16 @@ details.fold > summary:hover .fold-title {
       ["j k", "Next / previous item (or file)"],
       ["n", "Next unreviewed item"],
       ["[ ]", "Previous / next passage beside the item"],
-      ["a m d f r", "Accept · amend · decline · defer · revise"],
-      ["u", "Clear the ruling"],
+      ["a w m r d f", "Accept · with changes · amend · revise · decline · defer"],
+      ["↵", "Record the open ruling (Shift+↵ for a new line)"],
+      ["e u", "Edit · clear the ruling"],
+      ["b", "Edits inline, or before / after"],
       ["c q s i x", "Comment · question · suggest · intent here · mismatch — on selected text"],
       ["p", "This session: every ruling and note"],
       ["v", "Markdown as prose / as source"],
       ["/", "Filter files"],
       ["t", "Themes"],
-      ["?", "This list"],
+      ["?", "Legend and keys, from anywhere"],
       ["⌘↵ Esc", "Confirm / leave a text field"]
     ];
     return h("table", { class: "keys" }, h("tbody", {}, rows.map(([k, d]) => h("tr", {}, h("td", {}, k.split(" ").map((x) => h("kbd", {}, x))), h("td", {}, d)))));
@@ -7570,13 +8946,14 @@ details.fold > summary:hover .fold-title {
       groups.set(key, [...groups.get(key) ?? [], a]);
     }
     const clip = (s, n) => s.length > n ? \`\${s.slice(0, n)}…\` : s;
-    return h("aside", { class: "drawer", "aria-label": "This session" }, h("div", { class: "drawer-head" }, h("div", {}, h("div", { class: "title" }, "This session"), h("div", { class: "sub" }, \`\${rulings.length} rulings · \${S.review.annotations.length} notes\`)), h("button", { class: "icon-btn", title: "Close (p)", onclick: toggleDrawer }, "×")), h("div", { class: "drawer-body", "data-scroll": "drawer" }, h("h3", {}, "Rulings"), rulings.length === 0 ? h("p", { class: "muted small" }, "None yet. Rule on an item with a, m, d, f, or r.") : null, rulings.map((v) => {
+    return h("aside", { class: "drawer", "aria-label": "This session" }, h("div", { class: "drawer-head" }, h("div", {}, h("div", { class: "title" }, "This session"), h("div", { class: "sub" }, \`\${rulings.length} rulings · \${S.review.annotations.length} notes\`)), h("button", { class: "icon-btn", title: "Close (p)", onclick: toggleDrawer }, "×")), h("div", { class: "drawer-body", "data-scroll": "drawer" }, h("h3", {}, "Rulings"), rulings.length === 0 ? h("p", { class: "muted small" }, "None yet. Rule on an item with a, w, m, r, d, or f.") : null, rulings.map((v) => {
       const it = itemById(v.item);
-      const words = v.wording ?? v.why ?? v.ruling ?? v.request ?? "";
+      const words = v[VERDICT_WORDS[v.verdict].field] ?? "";
+      const state = rulingState(v.item);
       return h("div", { class: "entry" }, h("button", {
         class: "entry-main",
         onclick: () => select(items().findIndex((x) => x.id === v.item))
-      }, h("span", { class: \`vchip v-\${v.verdict}\` }, it ? verdictLabel(it, v.verdict) : v.verdict), h("span", { class: "entry-title" }, it?.title ?? v.item), words ? h("span", { class: "entry-words" }, clip(words, 120)) : null), h("button", {
+      }, h("span", { class: \`vchip v-\${v.verdict}\` }, it ? verdictLabel(it, v.verdict) : v.verdict), state === "recorded" ? null : h("span", { class: "vchip unfinished" }, state), h("span", { class: "entry-title" }, it?.title ?? v.item), words ? h("span", { class: "entry-words" }, clip(words, 120)) : null), h("button", {
         class: "icon-btn sm",
         title: "Remove this ruling",
         onclick: () => {
@@ -7603,6 +8980,8 @@ details.fold > summary:hover .fold-title {
       const target = a.target;
       S.view = "queue";
       S.current = Math.max(0, items().findIndex((i) => i.id === target.item));
+      if (target.kind === "field")
+        S.jump = { item: target.item, field: target.field };
     }
     scrollWanted = true;
     render();
@@ -7611,10 +8990,11 @@ details.fold > summary:hover .fold-title {
     ["judgment", "Needs your judgment"],
     ["none", "To review"],
     ["ruled", "Already ruled — confirm the wording"],
-    ["routine", "Routine"]
+    ["routine", "Routine"],
+    ["decided", "Decided earlier — context only"]
   ];
-  var groupOf = (it) => it.ruled ? "ruled" : it.attention ?? "none";
-  var grouped = () => items().some((it) => it.attention || it.ruled);
+  var groupOf = (it) => it.decided ? "decided" : it.ruled ? "ruled" : it.attention ?? "none";
+  var grouped = () => items().some((it) => it.attention || it.ruled || it.decided);
   function displayOrder() {
     const idx = items().map((_, i) => i);
     if (!grouped())
@@ -7630,7 +9010,21 @@ details.fold > summary:hover .fold-title {
   function queueRow(it, i) {
     const v = verdictOf(it.id);
     const notes = annotationsForItem(it.id).length;
-    return h("button", { class: \`qi \${i === S.current ? "on" : ""} \${v ? "done" : ""}\`, onclick: () => select(i) }, h("span", { class: \`dot v-\${v?.verdict ?? "none"}\` }), h("span", { class: "qbody" }, h("span", { class: "qmeta" }, h("span", { class: "mono" }, shortId(it.id)), it.category === "inline" ? h("span", { class: "tag" }, "inline") : null, !isIntentFeedback(it.kind) ? h("span", { class: "tag" }, kindLabel(it)) : null), h("span", { class: "qt" }, it.question)), h("span", { class: "qside" }, v ? h("span", { class: \`vchip v-\${v.verdict}\` }, verdictLabel(it, v.verdict)) : null, notes ? h("span", { class: "badge", title: \`\${notes} notes\` }, String(notes)) : null));
+    const state = it.decided ? "decided" : rulingState(it.id);
+    const dotTip = {
+      none: "Not ruled yet",
+      open: "Ruling open — not recorded yet",
+      unfinished: "Unfinished: a ruling is chosen but missing its words; not recorded",
+      recorded: "Ruling recorded",
+      decided: "Decided in an earlier pass — context only"
+    }[state];
+    return h("button", {
+      class: \`qi \${i === S.current ? "on" : ""} \${state === "recorded" ? "done" : ""} qs-\${state}\`,
+      onclick: () => select(i)
+    }, h("span", {
+      class: \`dot v-\${it.decided?.verdict ?? v?.verdict ?? "none"} ds-\${state}\`,
+      tip: dotTip
+    }), h("span", { class: "qbody" }, h("span", { class: "qmeta" }, h("span", { class: "mono" }, shortId(it.id)), it.category === "inline" ? h("span", { class: "tag" }, "inline") : null, !isIntentFeedback(it.kind) ? h("span", { class: "tag" }, kindLabel(it)) : null, it.decided ? h("span", { class: \`vchip faint v-\${it.decided.verdict}\` }, verdictLabel(it, it.decided.verdict)) : v && state === "recorded" ? h("span", { class: \`vchip v-\${v.verdict}\` }, \`✓ \${verdictLabel(it, v.verdict)}\`) : v ? h("span", { class: "vchip unfinished" }, state === "open" ? "open" : "unfinished") : null), h("span", { class: "qt" }, it.question)), h("span", { class: "qside" }, notes ? h("span", { class: "badge", title: \`\${notes} notes\` }, String(notes)) : null));
   }
   function queueNav() {
     const order = displayOrder();
@@ -7680,14 +9074,38 @@ details.fold > summary:hover .fold-title {
     if (next)
       showPassage(next);
   }
-  function pnum(p) {
+  function pnum(p, it = currentItem()) {
     if (!p || p.n === 0)
       return null;
     return h("button", {
       class: \`pn pn-\${p.role}\`,
-      tip: \`Passage \${p.n} — show it beside, in its file\`,
+      tip: it ? passageTip(it, p, "middle") : \`Passage \${p.n}\`,
       onclick: () => showPassage(p)
     }, String(p.n));
+  }
+  function passageTip(it, p, where) {
+    const text = fileText(p.path) ?? "";
+    const loc = \`\${p.path}:\${lineOf(text, p.start)}\`;
+    const lines = [];
+    if (p.role === "edit") {
+      const e = it.nowWhat?.edits?.[p.edit ?? 0];
+      lines.push(\`Passage \${p.n} — an edit \${shortId(it.id)} proposes\${e?.note ? \`: \${e.note}\` : ""}\`);
+      lines.push(\`In \${loc}.\`);
+      if (p.evidence.length)
+        lines.push("The same text is quoted under What.");
+      lines.push("Solid outline: this item would rewrite this text.");
+    } else {
+      const r = it.evidence[p.evidence[0] ?? 0];
+      lines.push(\`Passage \${p.n} — evidence \${shortId(it.id)} quotes under What\${r?.note ? \`: \${r.note}\` : ""}\`);
+      lines.push(\`In \${loc}.\`);
+      lines.push("Dotted outline: quoted as evidence — this item does not edit it.");
+    }
+    if (p.also.length) {
+      lines.push(\`Also edited by \${p.also.map((x) => shortId(x.item)).join(", ")} — see the ⚠ callout.\`);
+    }
+    lines.push(where === "middle" ? "Click to show it beside, in its whole file." : where === "tab" ? "Open the tab to see it marked in place." : "Numbered to match the item in the middle.");
+    return lines.join(\`
+\`);
   }
   var firstSentenceOf = (md) => {
     const s = clean(md);
@@ -7714,7 +9132,7 @@ details.fold > summary:hover .fold-title {
     const p = ip.passages.find((x) => x.evidence.includes(i));
     const text = fileText(r.path);
     const missing = r.quote && text !== undefined && !text.includes(r.quote);
-    return h("div", { class: "quoted" }, h("div", { class: "qhead" }, pnum(p), refLink(r, refLabel(r)), r.section ? h("span", { class: "meta" }, \`§ \${r.section}\`) : null, missing ? h("span", { class: "warn meta" }, "quote not found in the snapshot") : null), excerpt(r), r.note ? h("p", { class: "qnote" }, linked(r.note, itemCtx(it))) : null);
+    return h("div", { class: "quoted" }, h("div", { class: "qhead" }, pnum(p), refLink(r, refLabel(r)), r.section ? h("span", { class: "meta" }, \`§ \${r.section}\`) : null, missing ? h("span", { class: "warn meta" }, "quote not found in the snapshot") : null), excerpt(r), r.note ? h("p", { class: "qnote" }, linked(r.note, itemCtx(it), { item: it.id, field: \`evidence[\${i}].note\` })) : null);
   }
   function collisionsOf(it) {
     const ids = new Set(passagesOf(it).passages.flatMap((p) => p.also.map((a) => a.item)));
@@ -7742,6 +9160,7 @@ details.fold > summary:hover .fold-title {
     const sw = it.soWhat;
     const nw = it.nowWhat;
     const prepared = Boolean(w || sw || nw);
+    const at = (field) => ({ item: it.id, field });
     const head = h("header", { class: "item-head" }, h("div", { class: "eyebrow-row" }, h("button", {
       class: "btn ghost sm nav-toggle",
       tip: "Show the list of items",
@@ -7749,9 +9168,9 @@ details.fold > summary:hover .fold-title {
         S.navOpen = !S.navOpen;
         render();
       }
-    }, icon("list"), "Items"), h("span", { class: "tag strong" }, kindLabel(it)), it.category ? h("span", { class: "tag" }, it.category) : null, it.ruled ? h("span", { class: "tag ruled" }, "ruled — confirm the wording") : it.status ? h("span", { class: \`tag st-\${it.status}\` }, it.status) : null, it.attention ? h("span", { class: \`tag at-\${it.attention}\` }, it.attention === "judgment" ? "needs judgment" : "routine") : null, h("span", { class: "grow" }), fileText(it.source.path) !== undefined ? refLink(sourceRef, \`\${it.source.path}:\${it.source.line}\`, "quiet") : h("span", { class: "mono meta" }, \`\${it.source.path}:\${it.source.line}\`)), h("h1", { class: "question" }, linked(it.question, ctx)), h("p", { class: "subtitle" }, h("span", { class: "mono" }, shortId(it.id)), h("span", { class: "sep" }, "·"), linked(it.title, ctx)), it.members?.length ? h("p", { class: "members" }, h("span", { class: "callout-label" }, \`Stands for \${it.members.length}\`), it.members.map((m) => h("span", { class: "member" }, linked(shortId(m), ctx)))) : null, it.ruled ? h("div", { class: "callout ruled-note" }, h("div", { class: "callout-label" }, "Already ruled — this pass confirms the wording"), h("p", {}, h("strong", {}, \`\${it.ruled.by}, \${it.ruled.on}\`), it.ruled.where ? h("span", { class: "meta" }, \` (\${it.ruled.where})\`) : null, ": ", linked(it.ruled.ruling, ctx))) : null, onBranch ? h("div", { class: "callout info" }, linked(onBranch.text, ctx)) : null, it.baseStatusLine ? h("div", { class: "callout" }, h("div", { class: "callout-label" }, "Status on this branch"), h("p", {}, linked(it.statusLine ?? "", ctx)), h("div", { class: "callout-label" }, "At base"), h("p", {}, linked(it.baseStatusLine, ctx))) : null);
+    }, icon("list"), "Items"), h("span", { class: "tag strong" }, kindLabel(it)), it.category ? h("span", { class: "tag" }, it.category) : null, it.ruled ? h("span", { class: "tag ruled" }, "ruled — confirm the wording") : it.status ? h("span", { class: \`tag st-\${it.status}\` }, it.status) : null, it.attention ? h("span", { class: \`tag at-\${it.attention}\` }, it.attention === "judgment" ? "needs judgment" : "routine") : null, h("span", { class: "grow" }), fileText(it.source.path) !== undefined ? refLink(sourceRef, \`\${it.source.path}:\${it.source.line}\`, "quiet") : h("span", { class: "mono meta" }, \`\${it.source.path}:\${it.source.line}\`)), h("h1", { class: "question" }, linked(it.question, ctx, at("question"))), h("p", { class: "subtitle" }, h("span", { class: "mono" }, shortId(it.id)), h("span", { class: "sep" }, "·"), linked(it.title, ctx, at("title"))), it.decided ? h("div", { class: "callout decided-note" }, h("div", { class: "callout-label" }, \`Decided\${it.decided.pass ? \` in pass \${it.decided.pass}\` : " earlier"} — shown for context, not ruled again\`), h("p", {}, h("span", { class: \`vchip v-\${it.decided.verdict}\` }, verdictLabel(it, it.decided.verdict)), " ", h("strong", {}, \`\${it.decided.by}, \${it.decided.on}\`), it.decided.words ? [": ", it.decided.words] : null)) : null, it.members?.length ? h("p", { class: "members" }, h("span", { class: "callout-label" }, \`Stands for \${it.members.length}\`), it.members.map((m) => h("span", { class: "member" }, linked(shortId(m), ctx)))) : null, it.ruled ? h("div", { class: "callout ruled-note" }, h("div", { class: "callout-label" }, "Already ruled — this pass confirms the wording"), h("p", {}, h("strong", {}, \`\${it.ruled.by}, \${it.ruled.on}\`), it.ruled.where ? h("span", { class: "meta" }, \` (\${it.ruled.where})\`) : null, ": ", linked(it.ruled.ruling, ctx, at("ruled.ruling")))) : null, onBranch ? h("div", { class: "callout info" }, linked(onBranch.text, ctx)) : null, it.baseStatusLine ? h("div", { class: "callout" }, h("div", { class: "callout-label" }, "Status on this branch"), h("p", {}, linked(it.statusLine ?? "", ctx)), h("div", { class: "callout-label" }, "At base"), h("p", {}, linked(it.baseStatusLine, ctx))) : null);
     const whatBody = [
-      w ? plainProse(w.facts, ctx) : null,
+      w ? plainProse(w.facts, ctx, at("what.facts")) : null,
       !prepared && !isChange(it) ? h("p", { class: "callout" }, "The agent has not written this item’s What, So what, or Now what. What follows is what the scanner found.") : null,
       it.evidence.length ? [
         subhead(it.evidence.length === 1 ? "The passage in question" : "The passages in question"),
@@ -7759,11 +9178,11 @@ details.fold > summary:hover .fold-title {
       ] : null,
       w?.ranInto ? [
         subhead(isIntentFeedback(it.kind) ? "What the build ran into" : "What prompted it"),
-        plainProse(w.ranInto, ctx)
+        plainProse(w.ranInto, ctx, at("what.ranInto"))
       ] : null,
       w?.assumption ? [
         subhead(isIntentFeedback(it.kind) ? "The assumption made to keep moving" : "The assumption in place meanwhile"),
-        plainProse(w.assumption, ctx)
+        plainProse(w.assumption, ctx, at("what.assumption"))
       ] : null,
       it.changes?.length ? [
         subhead("What changed on this branch"),
@@ -7778,38 +9197,69 @@ details.fold > summary:hover .fold-title {
     const cols = collisionsOf(it);
     const rels = sw?.relations ?? [];
     const relRows = [
-      ...rels.map((r) => {
+      ...rels.map((r, j) => {
         const col = cols.find((c) => c.item === r.item);
-        return h("li", { class: col ? "collide" : undefined }, itemLink(r.item), h("span", {}, linked(r.note, ctx), col ? h("span", { class: "col-flag" }, " · edits the same passage") : null));
+        return h("li", { class: col ? "collide" : undefined }, itemLink(r.item), h("span", {}, linked(r.note, ctx, at(\`soWhat.relations[\${j}].note\`)), col ? h("span", { class: "col-flag" }, " · edits the same passage") : null));
       }),
       ...cols.filter((c) => !rels.some((r) => r.item === c.item)).map((c) => h("li", { class: "collide" }, itemLink(c.item), h("span", {}, "Edits the same passage as this item. Accepting both needs one wording", c.composed ? " — the composed wording is under Now what." : " — none is proposed yet.")))
     ];
     const soWhatBody = [
-      sw ? plainProse(sw.stakes, ctx) : null,
+      sw ? plainProse(sw.stakes, ctx, at("soWhat.stakes")) : null,
       relRows.length ? [subhead("How it touches other items"), h("ul", { class: "rel" }, relRows)] : null
     ];
     const edits = nw?.edits ?? [];
     const rec = nw?.recommendation;
     const nowBody = [
-      nw?.summary ? h("div", { class: "lead-prose" }, plainProse(nw.summary, ctx)) : null,
+      nw?.summary ? h("div", { class: "lead-prose" }, plainProse(nw.summary, ctx, at("nowWhat.summary"))) : null,
       edits.length ? [
-        subhead(edits.length === 1 ? "The proposed edit" : "The proposed edits"),
+        h("div", { class: "subhead-row" }, subhead(edits.length === 1 ? "The proposed edit" : "The proposed edits"), diffToggle()),
         edits.map((e, i) => editBlock(it, e, i))
       ] : null,
       nw && (nw.ifAccepted || nw.ifDeclined) ? [
         subhead("What each choice leads to"),
-        h("div", { class: "two outcomes" }, nw.ifAccepted ? h("div", { class: "outcome o-yes" }, h("div", { class: "callout-label" }, isChange(it) ? "If approved" : "If accepted"), plainProse(nw.ifAccepted, ctx)) : null, nw.ifDeclined ? h("div", { class: "outcome o-no" }, h("div", { class: "callout-label" }, isChange(it) ? "If rejected" : "If declined"), plainProse(nw.ifDeclined, ctx)) : null)
+        h("div", { class: "two outcomes" }, nw.ifAccepted ? h("div", { class: "outcome o-yes" }, h("div", { class: "callout-label" }, isChange(it) ? "If approved" : "If accepted"), plainProse(nw.ifAccepted, ctx, at("nowWhat.ifAccepted"))) : null, nw.ifDeclined ? h("div", { class: "outcome o-no" }, h("div", { class: "callout-label" }, isChange(it) ? "If rejected" : "If declined"), plainProse(nw.ifDeclined, ctx, at("nowWhat.ifDeclined"))) : null)
       ] : null,
       rec ? h("aside", { class: \`advice r-\${rec.verdict}\` }, h("div", { class: "advice-head" }, h("span", { class: "callout-label" }, "The agent’s advice"), h("span", {
         class: \`vchip v-\${rec.verdict}\`,
-        tip: (isChange(it) ? CHANGE_TIP : VERDICT_TIP)[rec.verdict]
-      }, capitalize(verdictLabel(it, rec.verdict))), h("span", { class: "meta" }, "advice only — the ruling is yours")), h("p", {}, linked(rec.why, ctx))) : null,
+        tip: verdictTip(it, rec.verdict)
+      }, verdictLabel(it, rec.verdict)), h("span", { class: "meta" }, "advice only — the ruling is yours")), h("p", {}, linked(rec.why, ctx, at("nowWhat.recommendation.why")))) : null,
       !nw && !isChange(it) ? h("p", { class: "meta" }, "No proposal yet: rule on the question as it stands, or ask for one (revise).") : null
     ];
     const previewWhat = w ? firstSentenceOf(w.facts) : \`\${it.evidence.length} passage(s) quoted\`;
     const previewSo = sw ? firstSentenceOf(sw.stakes) : "";
     const doc = h("div", { class: "doc" }, head, stage("what", "What", "The facts", whatBody, routine ? { preview: previewWhat } : undefined), sw || relRows.length ? stage("sowhat", "So what", "Why it matters", soWhatBody, routine ? { preview: previewSo || "How it touches other items" } : undefined) : null, stage("nowwhat", "Now what", isChange(it) ? "Your call on this change" : "Your choices", nowBody), notes.length ? collapsible(\`Your notes on this item · \${notes.length}\`, noteList(notes), true, 0, "item-notes") : h("p", { class: "hint" }, "Select any text — here, in a quoted passage, or in the file beside — to leave a note. Hover a note kind to see what it asks of the agent."));
     return h("main", { class: "center", "data-scroll": \`detail:\${it.id}\` }, doc, rulingBar(it, v));
+  }
+  function composedFor(it, other) {
+    const own = it.nowWhat?.composed ?? [];
+    const mine = own.findIndex((c) => c.with.includes(other));
+    if (mine >= 0)
+      return { c: own[mine], owner: it.id, k: mine };
+    const o = itemById(other);
+    const theirs = o?.nowWhat?.composed ?? [];
+    const k = theirs.findIndex((c) => c.with.includes(it.id));
+    if (o && k >= 0)
+      return { c: theirs[k], owner: o.id, k };
+    return;
+  }
+  function diffToggle() {
+    return h("div", { class: "seg seg-sm diff-toggle", role: "group", "aria-label": "How edits are shown" }, h("button", {
+      class: \`pill \${S.diff === "inline" ? "on" : ""}\`,
+      tip: "Inline — one run: removed words struck through, new words marked (b)",
+      onclick: () => setDiff("inline")
+    }, "Inline"), h("button", {
+      class: \`pill \${S.diff === "split" ? "on" : ""}\`,
+      tip: "Before / after — the current and the proposed wording as two blocks, each with its changes marked (b)",
+      onclick: () => setDiff("split")
+    }, "Before / after"));
+  }
+  function setDiff(mode, save = true) {
+    S.diff = mode;
+    if (save)
+      api("PUT", "/api/prefs", { diff: mode }).catch(() => {
+        return;
+      });
+    render();
   }
   function editBlock(it, e, i) {
     const ip = passagesOf(it);
@@ -7818,11 +9268,21 @@ details.fold > summary:hover .fold-title {
     const at = text.indexOf(e.before);
     const ctx = itemCtx(it);
     const others = p?.also ?? [];
-    return h("div", { class: "edit" }, h("div", { class: "qhead" }, pnum(p), refLink({ path: e.path, quote: e.before }, at >= 0 ? \`\${e.path}:\${lineOf(text, at)}\` : e.path), at < 0 ? h("span", { class: "warn meta" }, "the “before” text is not in the snapshot") : null), e.note ? h("p", { class: "qnote" }, linked(e.note, ctx)) : null, wordDiff(e.before, e.after), others.map((o) => {
-      const composed = it.nowWhat?.composed?.find((c) => c.with.includes(o.item)) ?? itemById(o.item)?.nowWhat?.composed?.find((c) => c.with.includes(it.id));
+    return h("div", { class: "edit" }, h("div", { class: "qhead" }, pnum(p), refLink({ path: e.path, quote: e.before }, at >= 0 ? \`\${e.path}:\${lineOf(text, at)}\` : e.path), at < 0 ? h("span", { class: "warn meta" }, "the “before” text is not in the snapshot") : null), e.note ? h("p", { class: "qnote" }, linked(e.note, ctx, { item: it.id, field: \`nowWhat.edits[\${i}].note\` })) : null, editDiff(e.before, e.after, {
+      before: beforeSource(e.path, e.before),
+      after: { item: it.id, field: \`nowWhat.edits[\${i}].after\` }
+    }, ctx), others.map((o) => {
+      const found = composedFor(it, o.item);
+      const composed = found?.c;
       return h("div", { class: "collision" }, h("div", { class: "callout-label" }, "⚠ The same passage is edited by ", itemLink(o.item)), composed ? [
         h("p", { class: "meta" }, \`If you accept both, the agent lands this composed wording instead\${composed.note ? " — " : "."}\`, composed.note ? linked(composed.note, ctx) : null),
-        composed.edits.filter((c) => c.path === e.path).map((c) => wordDiff(c.before, c.after))
+        composed.edits.map((c, j) => ({ c, j })).filter(({ c }) => c.path === e.path).map(({ c, j }) => editDiff(c.before, c.after, {
+          before: beforeSource(c.path, c.before),
+          after: {
+            item: found.owner,
+            field: \`nowWhat.composed[\${found.k}].edits[\${j}].after\`
+          }
+        }, ctx))
       ] : h("p", { class: "meta" }, "No composed wording is proposed: accepting both leaves the agent to reconcile them, or amend one with the wording you want."));
     }));
   }
@@ -7840,120 +9300,192 @@ details.fold > summary:hover .fold-title {
   function noteList(list) {
     return h("div", { class: "notes" }, list.map((a) => {
       const q = a.selector.exact;
-      return h("div", { class: \`note k-\${a.kind}\` }, h("div", { class: "row" }, h("span", { class: \`pill k-\${a.kind}\` }, a.kind), h("button", { class: "ref quiet", onclick: () => jumpTo(a) }, targetLabel(a)), h("span", { class: "grow" }), h("button", { class: "btn ghost sm", onclick: () => editAnnotation(a.id) }, "Edit")), h("div", { class: "note-quote" }, q.length > 280 ? \`\${q.slice(0, 280)}…\` : q), a.kind === "suggestion" ? wordDiff(q, a.suggestion ?? "") : null, a.comment ? h("p", {}, a.comment) : null);
+      return h("div", { class: \`note k-\${a.kind}\` }, h("div", { class: "row" }, h("span", { class: \`pill k-\${a.kind}\` }, a.kind), h("button", { class: "ref quiet", onclick: () => jumpTo(a) }, targetLabel(a)), h("span", { class: "grow" }), h("button", { class: "btn ghost sm", onclick: () => editAnnotation(a.id) }, "Edit")), h("div", { class: "note-quote" }, q.length > 280 ? \`\${q.slice(0, 280)}…\` : q), a.kind === "suggestion" ? editDiff(q, a.suggestion ?? "") : null, a.comment ? h("p", {}, a.comment) : null);
     }));
   }
   var VERDICT_KEYS = [
     ["accept", "a"],
+    ["accept-with-changes", "w"],
     ["amend", "m"],
+    ["revise", "r"],
     ["decline", "d"],
-    ["defer", "f"],
-    ["revise", "r"]
+    ["defer", "f"]
   ];
-  function fieldCopy(it, field) {
-    const change = isChange(it);
-    switch (field) {
-      case "wording":
-        return {
-          label: change ? "Your wording — the agent applies it on the branch" : "Your wording for the intent edit",
-          placeholder: "What the text should say…"
-        };
-      case "why":
-        return {
-          label: change ? "Why reject — the agent reverts or reworks it" : "Why — one line; it becomes the declined disposition",
-          placeholder: change ? "What is wrong with this change…" : "Why no intent change…"
-        };
-      case "ruling":
-        return {
-          label: "Ruling to record now (optional — leave empty to simply wait)",
-          placeholder: "The ruling, applied by a later intent edit…"
-        };
-      default:
-        return {
-          label: "What should change in the proposal or analysis",
-          placeholder: "Rework it so that…"
-        };
-    }
+  var gist = (md) => md ? firstSentenceOf(md) : "";
+  function verdictTip(it, k) {
+    const c = verdictCopy(it, k);
+    const nw = it.nowWhat;
+    const then = k === "accept" || k === "accept-with-changes" || k === "amend" ? nw?.ifAccepted ? \`
+If accepted: \${gist(nw.ifAccepted)}\` : "" : k === "decline" && nw?.ifDeclined ? \`
+If declined: \${gist(nw.ifDeclined)}\` : "";
+    return \`\${c.tip}
+Next: \${c.next}\${then}\`;
   }
   function rulingBar(it, v) {
-    const field = v ? v.verdict === "defer" ? "ruling" : REQUIRED_WORDS[v.verdict] : null;
-    const blur = () => document.activeElement?.blur();
+    if (it.decided)
+      return decidedBar(it);
+    const state = rulingState(it.id);
     const a = it.nowWhat;
-    const ctx = itemCtx(it);
-    const tips = tipsFor(it);
-    let words = null;
-    if (v && field) {
-      const copy = fieldCopy(it, field);
-      words = h("textarea", {
-        id: "verdict-words",
-        class: \`field \${field === "wording" ? "mono" : ""}\`,
-        rows: field === "wording" ? Math.min(8, Math.max(3, (v[field] ?? "").split(\`
-\`).length + 1)) : 2,
-        placeholder: copy.placeholder,
-        "aria-label": copy.label,
-        oninput: (e) => {
-          v[field] = e.target.value;
-          changed();
-        },
-        onkeydown: fieldKeys(blur, blur)
-      });
-      words.value = v[field] ?? "";
-    }
-    const side = v?.verdict === "accept" || v?.verdict === "amend" ? "yes" : v?.verdict === "decline" ? "no" : "";
-    const consequence = (which, text) => h("button", {
-      class: \`conseq c-\${which} \${side === which ? "picked" : ""}\`,
-      tip: "Click to read it in full",
-      onclick: (e) => e.currentTarget.classList.toggle("full")
-    }, h("span", { class: "eyebrow" }, which === "yes" ? isChange(it) ? "If approved" : "If accepted" : isChange(it) ? "If rejected" : "If declined"), h("span", { class: "conseq-text" }, linked(text, ctx)));
     const hasConseq = Boolean(a?.ifAccepted || a?.ifDeclined);
+    let top;
+    if (state === "open" && v)
+      top = rulingForm(it, v);
+    else if ((state === "recorded" || state === "unfinished") && v)
+      top = rulingChip(it, v, state);
+    else {
+      top = h("div", { class: "ruling-hint" }, h("span", {}, "Choose a ruling. Each asks one thing of you and says what the agent does next."), a?.recommendation ? h("span", { class: "muted" }, \` The agent recommends \${verdictLabel(it, a.recommendation.verdict)} (dashed).\`) : null, hasConseq ? h("button", {
+        class: "link-btn",
+        onclick: () => scrollToOutcomes(),
+        tip: "Show what each choice leads to, under Now what"
+      }, "What each choice leads to ↑") : null);
+    }
     return h("div", {
-      class: \`ruling \${v ? \`ruled v-\${v.verdict}\` : "unruled"}\`,
+      class: \`ruling st-\${state} \${v ? \`v-\${v.verdict}\` : ""}\`,
       role: "region",
       "aria-label": "Your ruling"
-    }, hasConseq ? collapsible("Consequences", h("div", { class: "conseqs" }, a?.ifAccepted ? consequence("yes", a.ifAccepted) : null, a?.ifDeclined ? consequence("no", a.ifDeclined) : null), true, 0, "dock-consequences") : null, h("div", { class: "ruling-head" }, h("span", { class: "ruling-title" }, "Your ruling"), v ? h("span", { class: \`vchip v-\${v.verdict}\` }, \`✓ \${verdictLabel(it, v.verdict)}\`) : h("span", { class: "muted small" }, "not ruled yet"), a?.recommendation && !v ? h("span", { class: "muted small" }, \`· agent recommends \${verdictLabel(it, a.recommendation.verdict)}\`) : null, h("span", { class: "grow" }), v ? h("button", {
+    }, h("div", { class: "ruling-top" }, top), h("div", { class: "ruling-head" }, h("span", { class: "ruling-title" }, "Your ruling"), h("span", { class: \`ruling-state rs-\${state}\` }, state === "none" ? "not ruled yet" : state === "open" ? "not recorded yet — Enter records it" : state === "unfinished" ? "unfinished — not recorded" : \`recorded · \${verdictLabel(it, v.verdict)}\`), h("span", { class: "grow" }), h("button", {
       class: "btn ghost sm",
-      tip: "Clear this ruling (u)",
+      tip: "Record this ruling (if open) and go to the next item without one (n)",
+      onclick: () => nextItem()
+    }, "Next", h("kbd", {}, "n"))), h("div", { class: "verdicts" }, VERDICT_KEYS.map(([k, key]) => h("button", {
+      class: \`vbtn v-\${k} \${v?.verdict === k ? "on" : ""} \${a?.recommendation?.verdict === k ? "rec" : ""}\`,
+      "aria-pressed": v?.verdict === k ? "true" : "false",
+      tip: verdictTip(it, k),
+      onclick: () => pickVerdict(it, k)
+    }, h("span", { class: "vb-label" }, verdictLabel(it, k)), h("kbd", {}, key)))));
+  }
+  function rulingForm(it, v) {
+    const copy = verdictCopy(it, v.verdict);
+    const { field, required } = VERDICT_WORDS[v.verdict];
+    const multi = field === "wording";
+    const box = h("textarea", {
+      id: "verdict-words",
+      class: \`field \${multi ? "mono" : ""}\`,
+      rows: multi ? Math.min(8, Math.max(3, (v[field] ?? "").split(\`
+\`).length + 1)) : 2,
+      placeholder: copy.input.placeholder,
+      "aria-label": copy.input.label,
+      oninput: (e) => {
+        v[field] = e.target.value;
+        if (S.formError) {
+          S.formError = null;
+          document.getElementById("form-error")?.remove();
+        }
+        changed();
+      },
+      onkeydown: (e) => {
+        if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+          e.preventDefault();
+          recordRuling(it);
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          cancelRuling(it);
+        }
+      }
+    });
+    box.value = v[field] ?? "";
+    return h("div", { class: "ruling-form" }, h("div", { class: "rf-head" }, h("span", { class: \`vchip v-\${v.verdict}\` }, copy.label), h("span", { class: "rf-next" }, copy.next)), h("label", { class: "lbl", for: "verdict-words" }, copy.input.label, required ? null : h("span", { class: "muted" }, " — you can leave it empty")), box, S.formError ? h("div", { id: "form-error", class: "form-error" }, S.formError) : null, h("div", { class: "rf-actions" }, h("span", { class: "meta" }, "Enter records it · Shift+Enter for a new line · Esc cancels"), h("span", { class: "grow" }), h("button", { class: "btn ghost sm", onclick: () => cancelRuling(it) }, "Cancel"), h("button", { class: \`btn sm record v-\${v.verdict}\`, onclick: () => recordRuling(it) }, "Record ruling", h("kbd", {}, "↵"))));
+  }
+  function rulingChip(it, v, state) {
+    const field = VERDICT_WORDS[v.verdict].field;
+    const words = v[field]?.trim();
+    const just = S.justRecorded === it.id;
+    if (just)
+      S.justRecorded = null;
+    return h("div", { class: \`ruled-chip \${state} \${just ? "just" : ""}\`, role: "status" }, h("div", { class: "rc-main" }, h("span", { class: \`vchip v-\${v.verdict} \${state === "recorded" ? "solid" : ""}\` }, state === "recorded" ? \`✓ Ruled: \${verdictLabel(it, v.verdict)}\` : verdictLabel(it, v.verdict)), state === "recorded" ? h("span", { id: "chip-save", class: \`chip-save \${S.saved}\` }) : h("span", { class: "warn small" }, \`Not recorded: \${verdictLabel(it, v.verdict)} needs \${VERDICT_WORDS[v.verdict].field === "wording" ? "your wording" : "its words"}.\`), h("span", { class: "grow" }), h("button", { class: "btn ghost sm", tip: "Change this ruling (e)", onclick: () => editRuling(it) }, state === "recorded" ? "Edit" : "Finish", h("kbd", {}, "e")), h("button", {
+      class: "btn ghost sm",
+      tip: "Remove this ruling: the item goes back to unreviewed (u)",
       onclick: () => {
         setVerdict(it.id, null);
         render();
       }
-    }, "Clear", h("kbd", {}, "u")) : null, h("button", {
-      class: "btn ghost sm",
-      tip: "Go to the next item without a ruling (n)",
-      onclick: nextUnreviewed
-    }, "Next", h("kbd", {}, "n"))), h("div", { class: "verdicts" }, VERDICT_KEYS.map(([k, key]) => h("button", {
-      class: \`vbtn v-\${k} \${v?.verdict === k ? "on" : ""} \${a?.recommendation?.verdict === k ? "rec" : ""}\`,
-      "aria-pressed": v?.verdict === k ? "true" : "false",
-      tip: tips[k],
-      onclick: () => pickVerdict(it, k)
-    }, h("span", { class: "vb-mark" }, v?.verdict === k ? "✓" : ""), h("span", { class: "vb-label" }, capitalize(verdictLabel(it, k))), h("kbd", {}, key)))), words && field ? [h("label", { class: "lbl", for: "verdict-words" }, fieldCopy(it, field).label), words] : null, v ? h("input", {
-      class: "field note-field",
-      placeholder: "Note to the agent (optional)",
-      value: v.note ?? "",
-      oninput: (e) => {
-        v.note = e.target.value;
-        changed();
-      },
-      onkeydown: fieldKeys(blur, blur)
-    }) : null);
+    }, "Clear", h("kbd", {}, "u"))), words ? h("div", { class: "rc-words" }, words) : null, state === "recorded" ? h("div", { class: "rc-next meta" }, verdictCopy(it, v.verdict).next) : null);
+  }
+  function decidedBar(it) {
+    const d = it.decided;
+    return h("div", { class: "ruling st-decided", role: "region", "aria-label": "Decided earlier" }, h("div", { class: "ruled-chip decided" }, h("div", { class: "rc-main" }, h("span", { class: \`vchip v-\${d.verdict}\` }, verdictLabel(it, d.verdict)), h("span", { class: "meta" }, \`decided by \${d.by}, \${d.on}\${d.pass ? \` in pass \${d.pass}\` : ""} — context only; not ruled again\`), h("span", { class: "grow" }), h("button", { class: "btn ghost sm", onclick: () => nextItem() }, "Next", h("kbd", {}, "n"))), d.words ? h("div", { class: "rc-words" }, d.words) : null));
   }
   function pickVerdict(it, k) {
-    setVerdict(it.id, k);
+    if (it.decided)
+      return;
+    const v = verdictOf(it.id);
+    if (S.editing !== it.id)
+      S.editingFrom = v ? structuredClone(v) : null;
+    if (v?.verdict !== k)
+      setVerdict(it.id, k);
+    S.editing = it.id;
+    S.formError = null;
     render();
-    if (k !== "accept")
-      setTimeout(() => document.getElementById("verdict-words")?.focus(), 0);
+    setTimeout(() => {
+      const box = document.getElementById("verdict-words");
+      box?.focus();
+      box?.setSelectionRange(box.value.length, box.value.length);
+    }, 0);
+  }
+  function editRuling(it) {
+    const v = verdictOf(it.id);
+    if (v)
+      pickVerdict(it, v.verdict);
+  }
+  function recordRuling(it) {
+    const v = verdictOf(it.id);
+    if (!v)
+      return false;
+    if (!isComplete(v)) {
+      S.formError = \`\${verdictLabel(it, v.verdict)} needs \${verdictCopy(it, v.verdict).input.label.toLowerCase().replace(/ —.*$/, "")}. Write it, or pick another ruling.\`;
+      render();
+      document.getElementById("verdict-words")?.focus();
+      return false;
+    }
+    S.editing = null;
+    S.editingFrom = null;
+    S.formError = null;
+    S.justRecorded = it.id;
+    changed();
+    render();
+    return true;
+  }
+  function cancelRuling(it) {
+    const was = S.editingFrom;
+    S.editing = null;
+    S.editingFrom = null;
+    S.formError = null;
+    const i = S.review.verdicts.findIndex((x) => x.item === it.id);
+    if (was) {
+      if (i === -1)
+        S.review.verdicts.push(was);
+      else
+        S.review.verdicts[i] = was;
+    } else if (i !== -1)
+      S.review.verdicts.splice(i, 1);
+    changed();
+    render();
+  }
+  function nextItem() {
+    const it = currentItem();
+    if (it && S.editing === it.id && !recordRuling(it))
+      return;
+    nextUnreviewed();
   }
   function nextUnreviewed() {
     const order = displayOrder();
     const pos = Math.max(0, order.indexOf(S.current));
     for (let d = 1;d <= order.length; d++) {
       const i = order[(pos + d) % order.length];
-      if (!verdictOf(items()[i].id)) {
+      const it = items()[i];
+      if (!it.decided && rulingState(it.id) !== "recorded") {
         select(i);
         return;
       }
     }
-    toast("Every item has a ruling. Press 4 to review and submit.");
+    toast("Every item has a recorded ruling. Press 5 to review and submit.");
+  }
+  function scrollToOutcomes() {
+    const el = document.querySelector(".center .outcomes");
+    if (!el)
+      return;
+    el.scrollIntoView({ block: "center", behavior: "smooth" });
+    flashEls([...el.querySelectorAll(".outcome")]);
   }
   var GROUP_COPY = {
     edit: {
@@ -8002,7 +9534,7 @@ details.fold > summary:hover .fold-title {
       class: \`stab g-\${f.group} \${f.path === path ? "on" : ""}\`,
       tip: f.why ? \`\${f.path} — \${f.why}\` : f.path,
       onclick: () => openTab(f)
-    }, h("span", { class: "stab-name" }, f.path.split("/").pop()), f.passages.some((p) => p.n > 0) ? h("span", { class: "stab-nums" }, f.passages.filter((p) => p.n > 0).sort((a, b) => a.n - b.n).map((p) => h("span", { class: \`pn pn-sm pn-\${p.role}\` }, String(p.n)))) : null);
+    }, h("span", { class: "stab-name" }, f.path.split("/").pop()), f.passages.some((p) => p.n > 0) ? h("span", { class: "stab-nums" }, f.passages.filter((p) => p.n > 0).sort((a, b) => a.n - b.n).map((p) => h("span", { class: \`pn pn-sm pn-\${p.role}\`, tip: passageTip(it, p, "tab") }, String(p.n)))) : null);
     const nums = ip.numbered;
     const at = nums.findIndex((p) => passKey(p) === S.pass && p.path === path);
     return h("aside", { class: "side", "aria-label": copy.title }, h("div", { class: "pane-head" }, h("div", { class: "pane-titles" }, h("div", { class: "pane-title" }, copy.title), h("div", { class: "pane-sub" }, after ? "After this item’s edits · read-only" : copy.sub)), nums.length ? h("div", { class: "pnav", role: "group", "aria-label": "Passages" }, h("button", { class: "icon-btn sm", tip: "Previous passage ([)", onclick: () => stepPassage(-1) }, "‹"), h("span", { class: "pnav-at" }, at >= 0 ? \`Passage \${nums[at].n} of \${nums.length}\` : \`\${nums.length} passage\${nums.length === 1 ? "" : "s"}\`), h("button", { class: "icon-btn sm", tip: "Next passage (])", onclick: () => stepPassage(1) }, "›")) : null), h("div", { class: "side-tabs" }, files.length === 0 && !pf ? h("span", { class: "meta pad" }, "Nothing to show beside this item.") : null, primary.length ? h("div", { class: \`tg tg-\${lead}\` }, h("span", { class: "tg-label" }, GROUP_COPY[lead].tabs), primary.map(tab)) : null, related.length ? h("div", { class: "tg tg-related" }, h("span", { class: "tg-label" }, GROUP_COPY.related.tabs), related.map(tab)) : null), path ? h("div", { class: "side-path" }, h("span", { class: "mono meta path-text" }, path), h("span", { class: "grow" }), pf?.group === "edit" && it.nowWhat?.edits?.length ? h("div", { class: "seg seg-sm", role: "group", "aria-label": "Which text" }, h("button", {
@@ -8017,7 +9549,7 @@ details.fold > summary:hover .fold-title {
       class: "btn ghost sm",
       tip: "Open this file in the Files view",
       onclick: () => openFile(path)
-    }, "Files", icon("ext"))) : null, pf?.group === "related" && pf.why ? h("div", { class: "why-here" }, h("span", { class: "callout-label" }, "Why this is here"), h("span", {}, linked(pf.why, itemCtx(it)))) : null, path && pf ? h("div", {
+    }, "Files", icon("ext"))) : null, pf?.group === "related" && pf.why ? h("div", { class: "why-here" }, h("span", { class: "callout-label" }, "Why this is here"), h("span", {}, linked(pf.why, itemCtx(it), whyField(it, pf)))) : null, path && pf ? h("div", {
       class: \`side-body \${pf.group === "related" ? "is-related" : ""}\`,
       "data-scroll": \`side:\${path}\`
     }, after ? afterView(it, pf) : passageView(it, pf)) : null);
@@ -8063,50 +9595,66 @@ details.fold > summary:hover .fold-title {
     ];
     const view = fileView(pf.path, { extra: marks });
     for (const p of pf.passages) {
+      const e = p.role === "edit" ? it.nowWhat?.edits?.[p.edit ?? 0] : undefined;
       decoratePassage(view, p, {
         label: passageLabel(it, p),
         also: p.also.map((a) => shortId(a.item)),
-        diff: p.role === "edit" ? (() => {
-          const e = it.nowWhat?.edits?.[p.edit ?? 0];
-          return e ? wordDiff(e.before, e.after) : null;
-        })() : null
+        tip: p.n > 0 ? passageTip(it, p, "pane") : undefined,
+        diff: e ? editDiff(e.before, e.after, {
+          before: { kind: "file", path: pf.path, off: p.start },
+          after: { item: it.id, field: \`nowWhat.edits[\${p.edit ?? 0}].after\` }
+        }, fileCtx(pf.path)) : null
       });
     }
     return view;
   }
   function afterView(it, pf) {
     const text = fileText(pf.path) ?? "";
-    const edits = pf.passages.filter((p) => p.role === "edit").sort((a, b) => a.start - b.start);
-    let out = "";
-    let pos = 0;
-    const spans = [];
-    for (const p of edits) {
-      if (p.start < pos)
-        continue;
+    const edits = pf.passages.filter((p) => p.role === "edit");
+    const applied = edits.flatMap((p) => {
       const e = it.nowWhat?.edits?.[p.edit ?? 0];
-      if (!e)
-        continue;
-      out += text.slice(pos, p.start);
-      spans.push({ p, start: out.length, end: out.length + e.after.length });
-      out += e.after;
-      pos = p.end;
-    }
-    out += text.slice(pos);
-    const marks = spans.map((s) => ({
-      start: s.start,
-      end: s.end,
-      cls: "pass pass-edit pass-after"
-    }));
+      return e ? [
+        {
+          start: p.start,
+          end: p.end,
+          after: e.after,
+          target: fieldTarget({ item: it.id, field: \`nowWhat.edits[\${p.edit ?? 0}].after\` }),
+          p
+        }
+      ] : [];
+    });
+    const { view: c, spans } = afterEdits(pf.path, text, applied, S.diff);
+    const marks = [
+      ...spans.map((sp) => ({ ...sp, cls: "pass pass-edit pass-after" })),
+      ...c.pieces.filter((p) => p.cls === "w-ins" || p.cls === "w-del").map((p) => ({ start: p.start, end: p.start + p.text.length, cls: p.cls })),
+      ...compositeMarks(c)
+    ];
     const lang = langOf(pf.path);
-    const view = lang === "markdown" && !S.raw ? proseView(out, { extra: marks, ctx: fileCtx(pf.path) }) : codeView(out, lang, { extra: marks, ctx: fileCtx(pf.path) });
-    for (const s of spans) {
-      decoratePassage(view, { ...s.p, start: s.start, end: s.end }, {
+    const view = lang === "markdown" && !S.raw ? proseView(c.text, { extra: marks, ctx: fileCtx(pf.path) }) : codeView(c.text, lang, { extra: marks, ctx: fileCtx(pf.path) });
+    view.classList.add("after-view");
+    compositeHost(view, c);
+    const sorted = [...applied].sort((x, y) => x.start - y.start);
+    spans.forEach((sp, k) => {
+      const src = sorted[k];
+      if (!src)
+        return;
+      decoratePassage(view, { ...src.p, start: sp.start, end: sp.end }, {
         label: "After the edit",
         also: [],
+        tip: passageTip(it, src.p, "pane"),
         diff: null
       });
-    }
+    });
     return view;
+  }
+  function whyField(it, pf) {
+    const c = (it.context ?? []).findIndex((r) => r.path === pf.path && r.why === pf.why);
+    if (c >= 0)
+      return { item: it.id, field: \`context[\${c}].why\` };
+    const e = it.evidence.findIndex((r) => r.path === pf.path && r.note === pf.why);
+    if (e >= 0)
+      return { item: it.id, field: \`evidence[\${e}].note\` };
+    return;
   }
   function decoratePassage(view, p, o) {
     const blocks2 = [...view.children].filter((c) => c instanceof HTMLElement && c.dataset.start !== undefined && !c.classList.contains("pdeco"));
@@ -8127,7 +9675,10 @@ details.fold > summary:hover .fold-title {
       "data-start": first.dataset.start,
       "data-end": first.dataset.start,
       contenteditable: "false"
-    }, p.n > 0 ? h("span", { class: \`pn pn-\${p.role}\` }, String(p.n)) : h("span", { class: "pctx" }, "Context"), h("span", { class: "plabel-body" }, h("span", { class: "plabel-text" }, o.label), o.also.length ? h("span", { class: "plabel-also" }, \`⚠ also edited by \${o.also.join(", ")}\`) : null));
+    }, p.n > 0 ? h("span", { class: \`pn pn-\${p.role}\`, tip: o.tip }, String(p.n)) : h("span", {
+      class: "pctx",
+      tip: "Context — a passage in a related file. It is not edited; it is shown for what it says."
+    }, "Context"), h("span", { class: "plabel-body" }, h("span", { class: "plabel-text" }, o.label), o.also.length ? h("span", { class: "plabel-also" }, \`⚠ also edited by \${o.also.join(", ")}\`) : null));
     first.before(label);
     if (o.diff) {
       last.after(h("div", {
@@ -8136,7 +9687,7 @@ details.fold > summary:hover .fold-title {
         "data-start": last.dataset.end,
         "data-end": last.dataset.end,
         contenteditable: "false"
-      }, h("div", { class: "callout-label pdiff-head" }, "Proposed wording for", h("span", { class: "pn pn-sm pn-edit" }, String(p.n))), o.diff));
+      }, h("div", { class: "callout-label pdiff-head" }, "Proposed wording for", h("span", { class: "pn pn-sm pn-edit", tip: o.tip }, String(p.n))), o.diff));
     }
   }
   function focusMarks(path) {
@@ -8191,7 +9742,7 @@ details.fold > summary:hover .fold-title {
       }
     }
     const cited = new Set(items().flatMap((it) => passagesOf(it).files.map((f) => f.path)));
-    const walk = (node, depth) => {
+    const walk2 = (node, depth) => {
       const out = [];
       for (const d of [...node.dirs.values()].sort((a, b) => a.name.localeCompare(b.name))) {
         const open = q !== "" || S.openDirs.has(d.path);
@@ -8207,7 +9758,7 @@ details.fold > summary:hover .fold-title {
           }
         }, icon("chev"), h("span", { class: "tn-name" }, d.name), counts.get(d.path) ? h("span", { class: "badge" }, String(counts.get(d.path))) : null));
         if (open)
-          out.push(...walk(d, depth + 1));
+          out.push(...walk2(d, depth + 1));
       }
       for (const f of node.files) {
         out.push(h("button", {
@@ -8242,7 +9793,7 @@ details.fold > summary:hover .fold-title {
       }
     });
     const omitted = S.packet.omitted ?? [];
-    return h("aside", { class: "nav files-nav", "data-scroll": "files-nav" }, h("div", { class: "filter-wrap" }, filter, h("div", { class: "small muted" }, \`\${paths.length} of \${FILES.size} files\`)), h("div", { class: "tree" }, walk(buildTree(paths), 0)), omitted.length ? h("details", { class: "omitted" }, h("summary", { class: "small muted" }, \`\${omitted.length} not in the snapshot\`), omitted.map((o) => h("div", { class: "small muted mono" }, \`\${o.path} — \${o.reason}\`))) : null);
+    return h("aside", { class: "nav files-nav", "data-scroll": "files-nav" }, h("div", { class: "filter-wrap" }, filter, h("div", { class: "small muted" }, \`\${paths.length} of \${FILES.size} files\`)), h("div", { class: "tree" }, walk2(buildTree(paths), 0)), omitted.length ? h("details", { class: "omitted" }, h("summary", { class: "small muted" }, \`\${omitted.length} not in the snapshot\`), omitted.map((o) => h("div", { class: "small muted mono" }, \`\${o.path} — \${o.reason}\`))) : null);
   }
   function filesView() {
     if (!S.file || !FILES.has(S.file)) {
@@ -8312,15 +9863,22 @@ details.fold > summary:hover .fold-title {
     return t;
   }
   function submitView() {
-    const unreviewed = items().filter((it) => !verdictOf(it.id));
+    const unreviewed = toRule().filter((it) => !verdictOf(it.id));
+    const unfinished = toRule().filter((it) => rulingState(it.id) === "unfinished");
     const counts = new Map;
     for (const v of S.review.verdicts)
       counts.set(v.verdict, (counts.get(v.verdict) ?? 0) + 1);
-    return h("main", { class: "page", "data-scroll": "submit" }, h("div", { class: "page-inner narrow" }, h("h1", {}, "Review & submit"), h("p", { class: "lead" }, \`\${S.review.verdicts.length} of \${items().length} items ruled · \${S.review.annotations.length} notes. Submitting hands everything to the agent, which carries it out and may come back with a smaller packet.\`), counts.size ? h("div", { class: "cards" }, [...counts.entries()].map(([k, n]) => h("div", { class: \`stat v-\${k}\` }, h("div", { class: "n" }, String(n)), h("div", { class: "l" }, k)))) : null, h("h2", {}, "Rulings"), h("div", { class: "rows" }, items().map((it, i) => {
+    return h("main", { class: "page", "data-scroll": "submit" }, h("div", { class: "page-inner narrow" }, h("h1", {}, "Review & submit"), h("p", { class: "lead" }, \`\${recordedCount()} of \${toRule().length} items ruled · \${S.review.annotations.length} notes. Submitting hands everything to the agent, which carries it out and may come back with a smaller packet.\`), counts.size ? h("div", { class: "cards" }, [...counts.entries()].map(([k, n]) => h("div", { class: \`stat v-\${k}\` }, h("div", { class: "n" }, String(n)), h("div", { class: "l" }, k)))) : null, h("h2", {}, "Rulings"), h("div", { class: "rows" }, items().map((it, i) => {
+      if (it.decided)
+        return null;
       const v = verdictOf(it.id);
-      const words = v ? v.wording ?? v.why ?? v.ruling ?? v.request ?? "" : "";
-      return h("button", { class: \`srow \${v ? "" : "todo"}\`, onclick: () => select(i) }, v ? h("span", { class: \`vchip v-\${v.verdict}\` }, verdictLabel(it, v.verdict)) : h("span", { class: "vchip" }, "unreviewed"), h("span", { class: "srow-title" }, h("span", { class: "mono small muted" }, shortId(it.id)), " ", it.title), words ? h("span", { class: "srow-words" }, words.length > 200 ? \`\${words.slice(0, 200)}…\` : words) : null);
-    })), unreviewed.length ? h("p", { class: "muted small" }, \`\${unreviewed.length} unreviewed — they stay as they are and come back next time.\`) : null, h("h2", {}, \`Notes · \${S.review.annotations.length}\`), S.review.annotations.length ? noteList(S.review.annotations) : h("p", { class: "muted small" }, "None."), S.packet.mode === "branch" ? overallPanel() : null, h("h2", {}, "Hand it back"), h("label", { class: "lbl" }, "Reviewer — recorded on rulings"), h("input", {
+      const words = v ? v[VERDICT_WORDS[v.verdict].field] ?? "" : "";
+      const st = rulingState(it.id);
+      return h("button", {
+        class: \`srow \${v ? "" : "todo"} \${st === "unfinished" ? "unfinished" : ""}\`,
+        onclick: () => select(i)
+      }, v ? h("span", { class: \`vchip v-\${v.verdict}\` }, \`\${st === "recorded" ? "✓ " : ""}\${verdictLabel(it, v.verdict)}\`) : h("span", { class: "vchip" }, "unreviewed"), st === "unfinished" ? h("span", { class: "vchip unfinished" }, "unfinished") : null, h("span", { class: "srow-title" }, h("span", { class: "mono small muted" }, shortId(it.id)), " ", it.title), words ? h("span", { class: "srow-words" }, words.length > 200 ? \`\${words.slice(0, 200)}…\` : words) : null);
+    })), unreviewed.length ? h("p", { class: "muted small" }, \`\${unreviewed.length} unreviewed — they stay as they are and come back next time.\`) : null, unfinished.length ? h("p", { class: "warn small" }, \`\${unfinished.length} unfinished — a ruling is chosen but missing its words. Finish or clear \${unfinished.length === 1 ? "it" : "them"} before submitting.\`) : null, h("h2", {}, \`Notes · \${S.review.annotations.length}\`), S.review.annotations.length ? noteList(S.review.annotations) : h("p", { class: "muted small" }, "None."), S.packet.mode === "branch" ? overallPanel() : null, h("h2", {}, "Hand it back"), h("label", { class: "lbl" }, "Reviewer — recorded on rulings"), h("input", {
       class: "field",
       value: S.review.reviewer,
       placeholder: "Your name",
@@ -8388,13 +9946,17 @@ details.fold > summary:hover .fold-title {
   function helpModal() {
     if (!S.help)
       return null;
+    const close = () => {
+      S.help = false;
+      render();
+    };
     return h("div", {
-      class: "modal",
-      onclick: () => {
-        S.help = false;
-        render();
+      class: "modal legend-modal",
+      onmousedown: (e) => {
+        if (e.target === e.currentTarget)
+          close();
       }
-    }, h("div", { class: "modal-box" }, h("div", { class: "modal-head" }, h("strong", {}, "Keyboard"), h("span", { class: "muted small" }, "More on the home page (1)")), keysTable()));
+    }, h("div", { class: "modal-box legend-box", role: "dialog", "aria-label": "Legend and keys" }, h("div", { class: "modal-head" }, h("strong", {}, "Legend and keys"), h("span", { class: "muted small" }, "Also on the home page (1)"), h("span", { class: "grow" }), h("button", { class: "icon-btn", title: "Close (Esc or ?)", onclick: close }, "×")), h("div", { class: "legend-scroll" }, legend(true))));
   }
   function go(v) {
     S.view = v;
@@ -8406,6 +9968,9 @@ details.fold > summary:hover .fold-title {
   function select(i) {
     if (i < 0 || i >= items().length)
       return;
+    S.editing = null;
+    S.editingFrom = null;
+    S.formError = null;
     S.view = "queue";
     S.current = i;
     S.side = null;
@@ -8423,6 +9988,7 @@ details.fold > summary:hover .fold-title {
   function render() {
     hidePeek();
     hideToolbar();
+    COMPOSITES.clear();
     for (const el of root.querySelectorAll("[data-scroll]")) {
       scrollMemo.set(el.dataset.scroll, el.scrollTop);
     }
@@ -8451,6 +10017,15 @@ details.fold > summary:hover .fold-title {
     }
   }
   function scrollToFocus() {
+    const j = S.jump;
+    S.jump = null;
+    if (j && S.view === "queue") {
+      const el = document.querySelector(\`.center [data-item="\${CSS.escape(j.item)}"][data-field="\${CSS.escape(j.field)}"]\`);
+      if (el) {
+        el.scrollIntoView({ block: "center" });
+        flashEls([el]);
+      }
+    }
     const pane = document.querySelector(S.view === "files" ? ".file-center" : ".side-body");
     if (!pane)
       return;
@@ -8499,6 +10074,7 @@ details.fold > summary:hover .fold-title {
     if (next)
       openFile(next);
   }
+  var it0 = () => S.view === "queue" ? currentItem() : undefined;
   function onKey(e) {
     if (S.ended)
       return;
@@ -8513,6 +10089,10 @@ details.fold > summary:hover .fold-title {
       return;
     }
     if (e.key === "Escape") {
+      if (S.editing && it0()) {
+        cancelRuling(it0());
+        return;
+      }
       if (S.help || S.drawer || S.picker) {
         S.help = false;
         S.drawer = false;
@@ -8524,7 +10104,7 @@ details.fold > summary:hover .fold-title {
     }
     const it = currentItem();
     const verdict = VERDICT_KEYS.find(([, k]) => k === e.key);
-    if (verdict && S.view === "queue" && it) {
+    if (verdict && S.view === "queue" && it && !it.decided) {
       e.preventDefault();
       pickVerdict(it, verdict[0]);
       return;
@@ -8538,12 +10118,21 @@ details.fold > summary:hover .fold-title {
     const actions = {
       j: () => S.view === "files" ? stepFile(1) : step(1),
       k: () => S.view === "files" ? stepFile(-1) : step(-1),
-      n: nextUnreviewed,
+      n: () => S.view === "queue" ? nextItem() : nextUnreviewed(),
       u: () => {
-        if (it && S.view === "queue") {
+        if (it && S.view === "queue" && !it.decided) {
           setVerdict(it.id, null);
           render();
         }
+      },
+      e: () => {
+        if (it && S.view === "queue" && verdictOf(it.id))
+          editRuling(it);
+      },
+      b: () => setDiff(S.diff === "inline" ? "split" : "inline"),
+      Enter: () => {
+        if (it && S.view === "queue" && S.editing === it.id)
+          recordRuling(it);
       },
       "1": () => go("home"),
       "2": () => go("queue"),
@@ -8601,7 +10190,7 @@ details.fold > summary:hover .fold-title {
       draftPath: p.data.draftPath,
       review: {
         reviewer: draft?.reviewer || packet.reviewer || "",
-        verdicts: (draft?.verdicts ?? []).filter((v) => packet.items.some((i) => i.id === v.item)),
+        verdicts: upgradeVerdicts(draft?.verdicts ?? []).filter((v) => packet.items.some((i) => i.id === v.item && !i.decided)),
         annotations: draft?.annotations ?? []
       },
       view: "home",
@@ -8626,13 +10215,19 @@ details.fold > summary:hover .fold-title {
       picker: false,
       customThemes: th.data.themes ?? [],
       themeDir: th.data.dir ?? null,
-      folds: loadFolds()
+      folds: loadFolds(),
+      diff: th.data.prefs?.diff === "inline" ? "inline" : "split",
+      editing: null,
+      editingFrom: null,
+      formError: null,
+      justRecorded: null,
+      jump: null
     };
     if (draft?.comment)
       S.review.comment = draft.comment;
     if (draft?.overall)
       S.review.overall = draft.overall;
-    S.current = displayOrder()[0] ?? 0;
+    S.current = displayOrder().find((i) => !items()[i].decided) ?? displayOrder()[0] ?? 0;
     applyHash();
     document.title = packet.title;
     document.addEventListener("keydown", onKey);
@@ -8741,6 +10336,26 @@ function cmdLocate(flags, io) {
   const packet = typeof flags.packet === "string" ? loadPacket(flags.packet).packet : null;
   const results = v.value.annotations.map((a) => {
     let path = null;
+    if (a.target.kind === "field") {
+      const { item, field } = a.target;
+      const it = packet?.items.find((i) => i.id === item);
+      const text2 = it ? fieldText(it, field) : undefined;
+      if (text2 === undefined)
+        return {
+          id: a.id,
+          item,
+          field,
+          status: "unknown",
+          note: packet ? `agent-written text; "${field}" names no text in "${item}"` : "agent-written text in the packet; pass --packet to check the quote"
+        };
+      return {
+        id: a.id,
+        item,
+        field,
+        note: "agent-written text in the packet, not in the repository",
+        ...locate(text2, a.selector)
+      };
+    }
     if (a.target.kind === "file")
       path = a.target.path;
     else {
@@ -8764,6 +10379,37 @@ function cmdLocate(flags, io) {
   });
   io.out(JSON.stringify(results, null, 2));
   return 0;
+}
+function cmdCheckApply(flags, io) {
+  const { packet, digest } = loadPacket(need(flags, "packet"));
+  const decisionsPath = need(flags, "decisions");
+  const { value } = readJsonFile(decisionsPath);
+  const v = validateDecisions(value, packet);
+  if (!v.ok)
+    throw new InputError(`${decisionsPath} is not a valid decisions file`, v.errors);
+  const root = resolve(need(flags, "repo"));
+  const read = (path) => {
+    try {
+      return readFileSync3(join3(root, path), "utf8");
+    } catch {
+      return;
+    }
+  };
+  let head;
+  try {
+    const git2 = (args) => execFileSync2("git", ["-C", root, ...args], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"]
+    }).trim();
+    head = `${git2(["rev-parse", "--abbrev-ref", "HEAD"])}@${git2(["rev-parse", "--short=12", "HEAD"])}`;
+  } catch {
+    head = undefined;
+  }
+  const report = checkApply(packet, digest, v.value, read, head);
+  io.out(JSON.stringify(report, null, 2));
+  const bad = report.edits.filter((e) => e.status !== "ok").length;
+  io.err(report.ok ? `review: ready to apply — ${report.edits.length} edit(s) anchored${report.ref.moved ? ` (the tree moved since the snapshot: ${report.ref.packet} → ${report.ref.head}; every before still holds)` : ""}` : `review: drift — ${bad} edit(s) not anchored, digest ${report.digest.match ? "matches" : "does NOT match"}; re-read the report before editing`);
+  return report.ok ? 0 : 4;
 }
 function configDir(env = process.env) {
   if (env.INTENT_REVIEW_CONFIG)

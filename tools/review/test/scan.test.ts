@@ -33,6 +33,21 @@ describe('parseRuled', () => {
       ruling: 'lineage is the reading.',
     });
   });
+  test('a re-confirmation between the date and "awaiting" is kept, not a parse failure', () => {
+    expect(
+      parseRuled(
+        'pending — ruled by Ryan 2026-11-06 (review of #109), confirmed 2026-11-08 in the review of #112, awaiting the intent edit: lineage is the reading. (#116)',
+      ),
+    ).toEqual({
+      by: 'Ryan',
+      on: '2026-11-06',
+      where: 'review of #109), confirmed 2026-11-08 in the review of #112',
+      ruling: 'lineage is the reading. (#116)',
+    });
+    expect(
+      parseRuled('pending — ruled by Ryan on 2026-11-06; awaiting its intent edit: shared.'),
+    ).toEqual({ by: 'Ryan', on: '2026-11-06', ruling: 'shared.' });
+  });
   test('a Status that names no ruling is not a ruled block', () => {
     expect(
       parseRuled('pending — ruled by Rae 2026-11-06, awaiting the intent edit:'),

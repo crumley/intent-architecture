@@ -30,6 +30,7 @@ import {
   type RepoFile,
   type Ruled,
   type Section,
+  shortIdOf,
 } from './schema.ts';
 
 export type ScanOptions = {
@@ -45,6 +46,12 @@ export type ScanOptions = {
   head?: string;
   /** What the snapshot carries: every tracked text file (default), or intent/ only. */
   files?: 'repo' | 'intent';
+  /**
+   * main mode: changes the agent knows have merged (`#116`, a URL…). A ruled item whose
+   * Status awaits one of them is offered as settling: the edit that flips it to adjudicated.
+   * The tool asks no forge; the agent says what merged.
+   */
+  merged?: string[];
 };
 
 /** Files larger than this are left out of the snapshot (and listed as omitted). */
@@ -109,6 +116,10 @@ function scanMain(root: string, opts: ScanOptions): ScanResult {
     }
   }
   items.push(...proposedDecisions(tree));
+  if (opts.merged?.length) {
+    const n = settleMerged(items, (p) => tree.read(p), opts.merged);
+    warnings.push(`--merged: ${n} ruled item(s) await a merged change and are offered as settling`);
+  }
   for (const it of items) withEntryContext(it, tree, inSnapshot);
 
   const name = basename(root);
@@ -550,18 +561,25 @@ function feedbackItem(f: {
 
 /**
  * A ruled-but-pending Status line, as the review skill writes it:
- * `pending — ruled by <who> <YYYY-MM-DD> [(<where>)], awaiting the intent edit: <ruling>`.
+ * `pending — ruled by <who> <YYYY-MM-DD> [(<where>)], awaiting the intent edit: <ruling> [(<change>)]`.
+ * Tolerant of what a later pass adds between the date and "awaiting" — a re-confirmation
+ * (`, confirmed 2026-11-08 in the review of #109,`), a second parenthesis — which is
+ * kept as `where`, so a re-confirmed item still reads as ruled.
  */
 export function parseRuled(line: string): Ruled | undefined {
   const m =
-    /ruled by\s+(.+?)\s+(\d{4}-\d{2}-\d{2})\s*(?:\(([^)]*)\))?\s*,?\s*awaiting the intent edit:?\s*([\s\S]*)$/i.exec(
+    /ruled by\s+(.+?)\s+(?:on\s+)?(\d{4}-\d{2}-\d{2})([\s\S]*?)\bawaiting (?:the |its )?intent edit\b:?\s*([\s\S]*)$/i.exec(
       line.replace(/`/g, ''),
     );
   if (!m) return undefined;
   const ruling = (m[4] as string).trim();
   if (!ruling) return undefined;
   const out: Ruled = { by: (m[1] as string).trim(), on: m[2] as string, ruling };
-  if (m[3]) out.where = (m[3] as string).trim();
+  // Between the date and "awaiting": a parenthesis alone is the where; anything longer is kept whole.
+  const mid = (m[3] as string).trim().replace(/^[,;\s]+|[,;\s]+$/g, '');
+  const paren = /^\(([^()]*)\)$/.exec(mid);
+  const where = paren ? (paren[1] as string).trim() : mid.replace(/^\(|\)$/g, '').trim();
+  if (where) out.where = where;
   return out;
 }
 
@@ -949,4 +967,75 @@ function gitRef(root: string, ref: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Settling: once the intent change a ruling awaited has merged, its Status becomes
+// adjudicated — the merge is the adjudication act. Nothing else owns that flip, so the
+// scanner proposes it when the agent says which changes merged.
+
+/** The link a Status line gives for a merged change, matched against a `--merged` value. */
+function mergedLink(statusLine: string, merged: string[]): string | undefined {
+  const tokens = statusLine.match(/\[[^\]]*\]\([^)]*\)|https?:\/\/[^\s)]+|#\d+/g) ?? [];
+  for (const m of merged) {
+    const n = /^#?(\d+)$/.exec(m.trim())?.[1];
+    const hit = tokens.find((t) =>
+      n
+        ? new RegExp(`(?:^#|/pull/|/merge_requests/|/pulls/)${n}(?!\\d)`).test(t)
+        : t.includes(m.trim()),
+    );
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
+/**
+ * Turn each ruled item whose Status awaits a merged change into a settling item: one
+ * routine edit flipping the Status to `adjudicated — <link> (<reviewer>'s ruling: …)`.
+ * Returns how many were turned. Items whose Status text cannot be found verbatim are left.
+ */
+export function settleMerged(
+  items: Item[],
+  read: (path: string) => string | undefined,
+  merged: string[],
+): number {
+  let n = 0;
+  for (const it of items) {
+    if (!it.ruled || !it.statusLine) continue;
+    const link = mergedLink(it.statusLine, merged);
+    if (!link) continue;
+    const text = read(it.source.path) ?? '';
+    const words = it.statusLine.split(/\s+/).filter(Boolean);
+    const re = new RegExp(words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s+'));
+    const before = re.exec(text)?.[0];
+    if (!before) continue;
+    const esc = link.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const ruling = it.ruled.ruling
+      .replace(new RegExp(`\\s*\\(?${esc}\\)?`), '')
+      .replace(/\s+$/, '')
+      .replace(/[.;,]$/, '');
+    const after = `adjudicated — ${link} (${it.ruled.by}'s ruling: ${ruling})`;
+    const sid = shortIdOf(it.id);
+    it.category = 'settle';
+    it.attention = 'routine';
+    it.question = `Record ${sid} as adjudicated — the intent change it awaited (${link}) has merged?`;
+    it.what = {
+      facts: `The Status reads “${it.statusLine}”. The change it awaits, ${link}, has merged (the agent said so to the scan).`,
+    };
+    it.soWhat = {
+      stakes:
+        'Until the Status says adjudicated, every open-items scan offers this item again as ruled-but-pending. The merge was the adjudication act; this records it.',
+    };
+    it.nowWhat = {
+      summary:
+        'Flip the Status line to adjudicated, linking the merged change and keeping the ruling in one line.',
+      edits: [{ path: it.source.path, before, after, note: 'the Status line' }],
+      ifAccepted: 'The item drops out of the open items; the ledger counts it adjudicated.',
+      ifDeclined: 'The Status keeps awaiting an edit that has already landed.',
+      recommendation: { verdict: 'accept', why: 'The intent change merged; this is bookkeeping.' },
+    };
+    delete it.ruled;
+    n++;
+  }
+  return n;
 }
