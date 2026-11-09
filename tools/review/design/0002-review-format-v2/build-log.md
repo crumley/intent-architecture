@@ -46,3 +46,6 @@ mise run check && mise run template-check  # repository root
 plus headless screenshots (Chrome over the DevTools protocol) of the real packet at 1440 and 1000 px
 in light and dark themes: a routine item, a judgment item, a ruled item, a related file in the side
 pane, the after-the-edits view, a reference clicked and flashed, and the home page.
+
+**What followed.** The first full pass with this page, and the first application of its rulings to
+the repository, are the next entry: [0003](../0003-rulings-that-lock-in/README.md).

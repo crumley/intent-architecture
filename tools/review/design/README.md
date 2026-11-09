@@ -16,6 +16,9 @@ skeleton rather than a local copy, so this subproject carries no second template
 - [`0002-review-format-v2/`](0002-review-format-v2/README.md) — the question-first item (what, so
   what, now what), packet version 2, edits told apart from context in the side pane, inline intent
   feedback in the scan, and the page's typography and rhythm.
+- [`0003-rulings-that-lock-in/`](0003-rulings-that-lock-in/README.md) — six verdicts with one box
+  each that lock in visibly, decisions version 2, notes on any text (the agent's included), two diff
+  modes, passage colour and a legend, and the apply-side checks (`check-apply`, `scan --merged`).
 
 ## Decisions
 
