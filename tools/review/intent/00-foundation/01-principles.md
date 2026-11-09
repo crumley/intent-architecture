@@ -36,9 +36,11 @@ honor these; they do not restate them.
    decisions after the repository has moved — often after its own edits from the same review — and a
    quote can still be found where a position has gone stale.
 8. **Anything can be annotated.** The reviewer may note any passage of any file the packet carries —
-   intent, design, or code — not only the items under review. _Why:_ the queue is a symptom and the
-   goal is better intent; the next problem, or the intent that lives only in code, is usually two
-   paragraphs or one package away from the item that brought the reviewer there.
+   intent, design, or code — not only the items under review, and any text the agent wrote for the
+   review: the question, the facts, a proposed wording. Only the page's own controls are not
+   annotatable, and a selection that cannot take a note says why. _Why:_ the queue is a symptom and
+   the goal is better intent; the next problem, or the intent that lives only in code, is usually
+   two paragraphs or one package away from the item that brought the reviewer there.
 9. **Readable first, then fast.** The page must never feel like a wall of text: summary before
    detail, supporting detail folded until wanted, prose at a readable measure, the passage in
    question visible beside the item without navigating away, colour that carries meaning (headings,

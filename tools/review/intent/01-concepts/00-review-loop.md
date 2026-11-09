@@ -58,32 +58,41 @@ comment only — that the agent can act on.
 An **item** is one thing a ruling is asked for: an intent-feedback item, an open question, an
 undecided decision, a change to an intent file or a design entry, or a finding a producer made. The
 kinds are an open vocabulary — a new producer may bring a new kind — because what the human does
-with an item does not depend on where it came from. A **verdict** is the ruling, one of five, each a
+with an item does not depend on where it came from. A **verdict** is the ruling, one of six, each a
 distinct act with a distinct outcome so the agent never has to guess which was meant:
 
-| Verdict     | The human means                                    | What must follow                                                        |
-| ----------- | -------------------------------------------------- | ----------------------------------------------------------------------- |
-| **accept**  | "The proposal (or the change) is right; make it."  | The change, as proposed, through review.                                |
-| **amend**   | "Yes, but with my wording."                        | The change, in the reviewer's wording, through review.                  |
-| **decline** | "No; here is why."                                 | The item settled as declined (or the change rejected), with the why.    |
-| **defer**   | "Not now" — optionally with the ruling to apply.   | The item stays open; a ruling, if given, is recorded on it as awaiting. |
-| **revise**  | "Rework the proposal or the analysis and show me." | A reworked item in the next iteration's packet; nothing settled.        |
+| Verdict                 | The human means                                         | What must follow                                                        |
+| ----------------------- | ------------------------------------------------------- | ----------------------------------------------------------------------- |
+| **accept**              | "The proposal (or the change) is right; make it."       | The change, as proposed, through review.                                |
+| **accept with changes** | "Yes — change it as I describe; you write the words."   | The change, reworded by the agent to the reviewer's instructions.       |
+| **amend**               | "Yes, but in exactly my words."                         | The change, in the reviewer's wording, through review.                  |
+| **revise**              | "Not yet: rework the proposal or analysis and show me." | A reworked item in the next iteration's packet; nothing settled.        |
+| **decline**             | "No; here is why."                                      | The item settled as declined (or the change rejected), with the why.    |
+| **defer**               | "Not now" — optionally with the ruling to apply.        | The item stays open; a ruling, if given, is recorded on it as awaiting. |
 
-_Why five and not three:_ accept/decline alone forces a reviewer who agrees with the direction but
-not the words into a false choice; and "rework this" is different from "decide later" — one comes
-back next iteration, the other waits. An item left without a verdict is simply unreviewed: it stays
-as it is and is offered again.
+_Why six:_ accept/decline alone forces a reviewer who agrees with the direction but not the words
+into a false choice; and "rework this" is different from "decide later" — one comes back next
+iteration, the other waits. Agreeing with the direction splits once more by **who writes the
+words**: the reviewer (amend) or the agent, to the reviewer's instructions (accept with changes) —
+the first real review showed a reviewer who wanted the wording changed but not to write it reaching
+for revise ("accept, however…"), which sends nothing to land. **Each verdict carries exactly one
+piece of the reviewer's words** — accept an optional note, accept with changes the instructions,
+amend the wording, revise the request, decline the why, defer an optional ruling — so what the agent
+must read is never split across two boxes. An accept's note is guidance, never new wording: a note
+that would change what the edit says comes back to the reviewer to confirm rather than landing
+unseen. An item left without a verdict is simply unreviewed: it stays as it is and is offered again.
 
 **Adjudication is still the merge.** A verdict is a ruling, not the settlement: in the intent
-architecture an intent-feedback item is settled when the intent change carrying it merges. So accept
-and amend produce a change for review and record the item as ruled-and-awaiting; only the merge
-settles it. _Why:_ the tool must not move the moment of adjudication out of history and into a local
-file.
+architecture an intent-feedback item is settled when the intent change carrying it merges. So the
+verdicts that land a change (accept, accept with changes, amend) produce one for review and record
+the item as ruled-and-awaiting; only the merge settles it. _Why:_ the tool must not move the moment
+of adjudication out of history and into a local file.
 
 ## Notes
 
 A **note** (an annotation) is the reviewer's words anchored to a quoted passage — in any file the
-packet carries, or in an item's own text — with one of five intents:
+packet carries, in an item's own text, or in anything the agent wrote for the review (the question,
+the facts, a proposed wording, a consequence) — with one of five intents:
 
 - **comment** — consider this;
 - **question** — answer this;
@@ -99,9 +108,9 @@ code and intent that extraction and drift review run on.
 ## Canonical home for
 
 - The loop and its iteration; the two modes and the overall verdict on a change; what an item is,
-  its shape (one question; what, so what, now what), and that item kinds are open; the five verdicts
-  and what each must lead to; the ruled-is-not-settled rule; what a note is, its five intents, and
-  that every one is acted on.
+  its shape (one question; what, so what, now what), and that item kinds are open; the six verdicts,
+  what each must lead to, and their one piece of words each; the ruled-is-not-settled rule; what a
+  note is, its five intents, and that every one is acted on.
 
 ## Left to implementation
 
