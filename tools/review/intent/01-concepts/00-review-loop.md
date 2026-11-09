@@ -75,12 +75,12 @@ into a false choice; and "rework this" is different from "decide later" — one 
 iteration, the other waits. Agreeing with the direction splits once more by **who writes the
 words**: the reviewer (amend) or the agent, to the reviewer's instructions (accept with changes) —
 the first real review showed a reviewer who wanted the wording changed but not to write it reaching
-for revise ("accept, however…"), which sends nothing to land. **Each verdict carries exactly one
-piece of the reviewer's words** — accept an optional note, accept with changes the instructions,
-amend the wording, revise the request, decline the why, defer an optional ruling — so what the agent
-must read is never split across two boxes. An accept's note is guidance, never new wording: a note
-that would change what the edit says comes back to the reviewer to confirm rather than landing
-unseen. An item left without a verdict is simply unreviewed: it stays as it is and is offered again.
+for revise, which sends nothing to land. **Each verdict carries exactly one piece of the reviewer's
+words** — accept an optional note, accept with changes the instructions, amend the wording, revise
+the request, decline the why, defer an optional ruling — so what the agent must read is never split
+across two boxes. An accept's note is guidance, never new wording: a note that would change what the
+edit says comes back to the reviewer to confirm rather than landing unseen. An item left without a
+verdict is simply unreviewed: it stays as it is and is offered again.
 
 **Adjudication is still the merge.** A verdict is a ruling, not the settlement: in the intent
 architecture an intent-feedback item is settled when the intent change carrying it merges. So the
