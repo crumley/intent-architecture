@@ -198,8 +198,10 @@ at the foot. The full field list is in markup's
 - **Open questions** — What: the question as tracked, who owns it, what has happened since. So what:
   what is blocked or keeps being re-deferred. Now what: a proposed answer as an edit to the owning
   slice, or — when there is none — `defer`, optionally with a ruling to record. A question that is
-  really a **standing watch** (a check to repeat, not a question to settle) gets an edit that marks
-  it `_Standing watch._`; accepted, the scanner stops offering it every pass.
+  really a **standing watch** (a check to repeat, not a question to settle) gets an edit that
+  **moves** it into `intent/README.md`'s _Standing watches_ — merged into the matching watch, or
+  added as a new one — and removes it from the open questions, rather than marking it
+  `_Standing watch._`; accepted, it leaves the queue because it is no longer a question.
 - **Decisions (ADRs still proposed)** — What: what the ADR chooses, over what, and since when. So
   what: what stays unsettled while it is proposed (in-place amendment instead of superseding, a
   build starting on an unsettled choice), and any open premise. Now what: the Status edit, with the
@@ -323,8 +325,9 @@ Then the Status lines (design edits), then everything else the notes ask for.
   goes into the ADR's Consequences, in the same change as its Status.
 - **Open questions:** accept/amend resolves the question in the slice that owns it (and marks it
   settled or removes it from the index, per the repository's convention) in an intent change — or,
-  when the edit marks it `_Standing watch._`, makes that one edit; decline removes it with the why;
-  defer leaves it.
+  when the edit moves it into `intent/README.md`'s _Standing watches_, makes that move in one intent
+  change (the watch added or merged, the question removed from `open-questions.md` or its slice and
+  from the index); decline removes it with the why; defer leaves it.
 - **Grouped items** (`members`): the verdict applies to each member — one Status line per member,
   and the edits in one change. A note on a member's own text is that member's.
 - **Collisions:** when both colliding items land, land the `composed` wording, not either edit
