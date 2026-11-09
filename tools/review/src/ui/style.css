@@ -3480,7 +3480,10 @@ button.pn:hover {
   box-shadow: 0 1px 0 color-mix(in srgb, var(--accent-passage) 60%, transparent);
 }
 @media (max-width: 1180px) {
-  .diff-btn .pre {
+  .theme-btn .tname {
     display: none;
   }
+}
+.quoted .excerpt {
+  border-left-color: var(--accent-passage);
 }

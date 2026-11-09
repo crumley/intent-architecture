@@ -6184,9 +6184,12 @@ button.pn:hover {
   box-shadow: 0 1px 0 color-mix(in srgb, var(--accent-passage) 60%, transparent);
 }
 @media (max-width: 1180px) {
-  .diff-btn .pre {
+  .theme-btn .tname {
     display: none;
   }
+}
+.quoted .excerpt {
+  border-left-color: var(--accent-passage);
 }
 </style>
 </head>
@@ -8782,7 +8785,7 @@ button.pn:hover {
         S.picker = !S.picker;
         render();
       }
-    }, h("span", { class: "swatch", style: theme ? swatchStyle(theme) : "" }), theme?.name ?? "Theme"), h("button", {
+    }, h("span", { class: "swatch", style: theme ? swatchStyle(theme) : "" }), h("span", { class: "tname" }, theme?.name ?? "Theme")), h("button", {
       class: \`btn ghost sm help-btn \${S.help ? "on" : ""}\`,
       tip: "Legend and keys — what the colours, numbers, and outlines mean (?)",
       "aria-label": "Legend and keys",

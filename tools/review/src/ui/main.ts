@@ -1666,7 +1666,7 @@ function header(): HTMLElement {
           },
         },
         h('span', { class: 'swatch', style: theme ? swatchStyle(theme) : '' }),
-        theme?.name ?? 'Theme',
+        h('span', { class: 'tname' }, theme?.name ?? 'Theme'),
       ),
       h(
         'button',
