@@ -1,16 +1,25 @@
 // The agent <-> tool contract: the packet (agent -> tool, version 2) and the
-// decisions (tool -> agent, version 1). Types and validators live together because
+// decisions (tool -> agent, version 2; version 1 is still read). Types and validators live together because
 // both sides of the wire (server, page, `validate`) must agree on exactly one reading.
 // The field-by-field reference ships with the skill (references/review-contract.md);
-// the rationale is in design/0002-review-format-v2/README.md.
+// the rationale is in design/0002-review-format-v2/README.md and, for decisions
+// version 2, design/0003-rulings-that-lock-in/README.md.
+
+import { fieldText } from './fields.ts';
 
 export const PACKET_KIND = 'intent-review-packet';
 export const DECISIONS_KIND = 'intent-review-decisions';
 export const DRAFT_KIND = 'intent-review-draft';
 /** The packet's version. Version 2 shapes each item as question → what → so what → now what. */
 export const PACKET_VERSION = 2;
-/** The decisions' (and the draft's) version: unchanged since the first release. */
-export const DECISIONS_VERSION = 1;
+/**
+ * The decisions' (and the draft's) version. Version 2 adds the accept-with-changes
+ * verdict, gives every verdict exactly one words field, and lets a note anchor to
+ * agent-written text (a `field` target). Version 1 files are still read.
+ */
+export const DECISIONS_VERSION = 2;
+/** Decisions versions this release reads: the current one, and version 1. */
+export const DECISIONS_READ = [1, 2] as const;
 
 export type Mode = 'main' | 'branch';
 /**
@@ -20,7 +29,13 @@ export type Mode = 'main' | 'branch';
 export type ItemKind = string;
 export type IfStatus = 'pending' | 'ruled' | 'adjudicated' | 'declined';
 export type Attention = 'judgment' | 'routine';
-export type VerdictKind = 'accept' | 'amend' | 'decline' | 'defer' | 'revise';
+export type VerdictKind =
+  | 'accept'
+  | 'accept-with-changes'
+  | 'amend'
+  | 'revise'
+  | 'decline'
+  | 'defer';
 export type OverallKind = 'approve' | 'request-changes' | 'comment';
 export type AnnotationKind = 'comment' | 'question' | 'suggestion' | 'intent-here' | 'mismatch';
 export type ChangeStatus = 'added' | 'modified' | 'deleted' | 'renamed';
@@ -40,7 +55,23 @@ export const isIntentFeedback = (kind: string): boolean => kind === 'if' || kind
 
 export const IF_STATUSES: readonly IfStatus[] = ['pending', 'ruled', 'adjudicated', 'declined'];
 export const ATTENTION: readonly Attention[] = ['judgment', 'routine'];
-export const VERDICTS: readonly VerdictKind[] = ['accept', 'amend', 'decline', 'defer', 'revise'];
+/** In the order the page offers them: from "land it" to "not now". */
+export const VERDICTS: readonly VerdictKind[] = [
+  'accept',
+  'accept-with-changes',
+  'amend',
+  'revise',
+  'decline',
+  'defer',
+];
+/** The verdicts decisions version 1 knew. */
+export const VERDICTS_V1: readonly VerdictKind[] = [
+  'accept',
+  'amend',
+  'decline',
+  'defer',
+  'revise',
+];
 export const OVERALL: readonly OverallKind[] = ['approve', 'request-changes', 'comment'];
 export const ANNOTATION_KINDS: readonly AnnotationKind[] = [
   'comment',
@@ -51,14 +82,30 @@ export const ANNOTATION_KINDS: readonly AnnotationKind[] = [
 ];
 const CHANGE_STATUSES: readonly ChangeStatus[] = ['added', 'modified', 'deleted', 'renamed'];
 
-/** The words each verdict must carry, by field name; accept and defer need none. */
-export const REQUIRED_WORDS: Record<VerdictKind, 'wording' | 'why' | 'request' | null> = {
-  accept: null,
-  amend: 'wording',
-  decline: 'why',
-  defer: null,
-  revise: 'request',
+export type WordsField = 'note' | 'instructions' | 'wording' | 'request' | 'why' | 'ruling';
+/**
+ * Each verdict carries exactly one words field, required or not: the one box the
+ * page shows for it. Accept's note and defer's ruling are optional; the rest are not.
+ */
+export const VERDICT_WORDS: Record<VerdictKind, { field: WordsField; required: boolean }> = {
+  accept: { field: 'note', required: false },
+  'accept-with-changes': { field: 'instructions', required: true },
+  amend: { field: 'wording', required: true },
+  revise: { field: 'request', required: true },
+  decline: { field: 'why', required: true },
+  defer: { field: 'ruling', required: false },
 };
+const WORDS_FIELDS: readonly WordsField[] = [
+  'note',
+  'instructions',
+  'wording',
+  'request',
+  'why',
+  'ruling',
+];
+/** The required words of a verdict, or null when its one box is optional. */
+export const requiredWords = (v: VerdictKind): WordsField | null =>
+  VERDICT_WORDS[v].required ? VERDICT_WORDS[v].field : null;
 
 /**
  * A pointer into the snapshot: a file, optionally narrowed by a section heading,
@@ -83,6 +130,17 @@ export type Relation = { item: string; note: string };
 export type Composed = { with: string[]; edits: Edit[]; note?: string };
 /** An item already ruled on (its Status says so): this pass confirms the wording. */
 export type Ruled = { by: string; on: string; ruling: string; where?: string };
+/**
+ * An item the human ruled on in an earlier pass of this review, carried as context:
+ * shown read-only, never ruled again. `words` is what they wrote with the verdict.
+ */
+export type Decided = {
+  verdict: VerdictKind;
+  by: string;
+  on: string;
+  words?: string;
+  pass?: number;
+};
 export type Recommendation = { verdict: VerdictKind; why: string };
 
 /** One changed file in branch mode: a unified diff (`git diff`-style) of base...head. */
@@ -113,6 +171,8 @@ export type Item = {
   baseStatusLine?: string; // branch mode: the intent-feedback item's Status at the base, when the branch changed it
   attention?: Attention; // either mode: needs the human's judgment, or routine
   ruled?: Ruled;
+  /** Ruled in an earlier pass: context only, not offered for a ruling. */
+  decided?: Decided;
   /** A grouped item: the ids (as the ledger names them) of the items it stands for. */
   members?: string[];
   source: SourceRef;
@@ -173,18 +233,26 @@ export type Packet = {
 export type Verdict = {
   item: string;
   verdict: VerdictKind;
+  note?: string;
+  instructions?: string;
   wording?: string;
+  request?: string;
   why?: string;
   ruling?: string;
-  request?: string;
-  note?: string;
 };
 
 export type Selector = { exact: string; prefix: string; suffix: string };
 
+/**
+ * What a note is anchored to: a file in the snapshot; one of an item's own
+ * sections (the item as written in the repository); or (decisions version 2) a
+ * field of agent-written text in the packet — the question, What, an edit's
+ * proposed wording — named by its path (src/fields.ts).
+ */
 export type AnnotationTarget =
   | { kind: 'file'; path: string }
-  | { kind: 'item'; item: string; section: string };
+  | { kind: 'item'; item: string; section: string }
+  | { kind: 'field'; item: string; field: string };
 
 export type Annotation = {
   id: string;
@@ -210,7 +278,8 @@ export type Overall = { verdict: OverallKind; note?: string };
 
 export type Decisions = {
   kind: typeof DECISIONS_KIND;
-  version: typeof DECISIONS_VERSION;
+  version: (typeof DECISIONS_READ)[number]; // the page writes 2; version 1 files are read
+
   packet: PacketRef;
   reviewer: string;
   submittedAt: string;
@@ -231,7 +300,7 @@ export type ReviewState = {
 
 export type Draft = ReviewState & {
   kind: typeof DRAFT_KIND;
-  version: typeof DECISIONS_VERSION;
+  version: (typeof DECISIONS_READ)[number];
   packet: PacketRef;
 };
 
@@ -271,13 +340,14 @@ class Checker {
     if (typeof v === 'string' && (allowed as readonly string[]).includes(v)) return true;
     return this.fail(path, `must be one of ${allowed.map((a) => `"${a}"`).join(', ')}`);
   }
-  header(v: Record<string, unknown>, kind: string, version: number): boolean {
+  header(v: Record<string, unknown>, kind: string, version: number | readonly number[]): boolean {
     if (v.kind !== kind) return this.fail('kind', `must be "${kind}"`);
-    if (v.version !== version) {
+    const known = typeof version === 'number' ? [version] : version;
+    if (!known.includes(v.version as number)) {
       const why =
         kind === PACKET_KIND && v.version === 1
           ? `this is a version 1 packet; this tool reads version ${version}.\n${V1_TO_V2}`
-          : `unsupported version ${JSON.stringify(v.version)}; this tool reads ${version}`;
+          : `unsupported version ${JSON.stringify(v.version)}; this tool reads ${known.join(' or ')}`;
       return this.fail('version', why);
     }
     return true;
@@ -297,7 +367,7 @@ export const V1_TO_V2 = `Version 2 asks every item one question and answers it i
     - context[].note            -> context[].why        (now required: why the file is shown)
     - a ruled item gains        ruled: { by, on, ruling }   (status "ruled": confirm the wording)
     - attention is now valid in main mode too; the queue orders by it.
-  The decisions file is unchanged (still version 1). Full reference: references/review-contract.md.`;
+  Full reference: references/review-contract.md.`;
 function done<T>(c: Checker, v: unknown): Result<T> {
   return c.errors.length === 0 ? { ok: true, value: v as T } : { ok: false, errors: c.errors };
 }
@@ -450,6 +520,17 @@ export function validatePacket(v: unknown): Result<Packet> {
         }
         c.string(it.ruled.ruling, `${p}.ruled.ruling`, { nonEmpty: true });
         c.optString(it.ruled.where, `${p}.ruled.where`);
+      }
+      if (it.decided !== undefined && c.object(it.decided, `${p}.decided`)) {
+        c.oneOf(it.decided.verdict, VERDICTS, `${p}.decided.verdict`);
+        c.string(it.decided.by, `${p}.decided.by`, { nonEmpty: true });
+        if (c.string(it.decided.on, `${p}.decided.on`, { nonEmpty: true })) {
+          if (!/^\d{4}-\d{2}-\d{2}/.test(it.decided.on)) {
+            c.fail(`${p}.decided.on`, 'must be a date, YYYY-MM-DD');
+          }
+        }
+        c.optString(it.decided.words, `${p}.decided.words`);
+        if (it.decided.pass !== undefined) c.int(it.decided.pass, `${p}.decided.pass`, 1);
       }
       if (it.members !== undefined && c.array(it.members, `${p}.members`)) {
         it.members.forEach((m, j) => {
@@ -647,6 +728,38 @@ export function draftQuestion(it: Pick<Item, 'id' | 'kind' | 'title'>): string {
   }
 }
 
+/** Prose that promises an edit — one the human would never see worded unless it is an edit. */
+const PROMISED_EDIT =
+  /\b(?:the agent|we|I)\s+(?:(?:would|will|also|then|can)\s+)*(?:makes?|adds?|edits?|updates?|marks?|removes?|rewrites?|amends?)\b(?!\s+(?:the|this|these)\s+edits?\s+(?:as\s+)?(?:shown|above|below))[^.;]{0,40}|\bconsequential edits?\b|\b(?:also|and then)\s+(?:edit|update|amend|rewrite)s?\b[^.;]{0,40}/i;
+
+/**
+ * An edit whose `before` stops mid-sentence and whose `after` only adds to it inserts text
+ * in the middle of a sentence or bullet; one that starts or ends inside a word splits it.
+ * Says how to anchor it at a boundary, or null when it is anchored well.
+ */
+export function boundaryCut(text: string, e: Edit): string | null {
+  const at = text.indexOf(e.before);
+  if (at < 0 || !e.before) return null;
+  const prev = text[at - 1] ?? '\n';
+  const next = text[at + e.before.length] ?? '\n';
+  const first = e.before[0] as string;
+  const last = e.before[e.before.length - 1] as string;
+  const word = /[\p{L}\p{N}_]/u;
+  if ((word.test(prev) && word.test(first)) || (word.test(last) && word.test(next))) {
+    return '"before" starts or ends inside a word — widen it to whole words';
+  }
+  const endsAtBoundary = next === '\n' || /[.!?:;]$/.test(e.before.trimEnd());
+  if (e.after.startsWith(e.before) && e.after.length > e.before.length && !endsAtBoundary) {
+    const rest =
+      text
+        .slice(at + e.before.length)
+        .split('\n')[0]
+        ?.slice(0, 40) ?? '';
+    return `the edit inserts after a "before" that stops mid-sentence (it continues "${rest}…") — extend "before" to the end of the sentence or bullet so the new text lands at a boundary`;
+  }
+  return null;
+}
+
 export function advise(packet: Packet): Advice[] {
   const out: Advice[] = [];
   const text = new Map(packet.files.map((f) => [f.path, f.text]));
@@ -664,6 +777,8 @@ export function advise(packet: Packet): Advice[] {
   };
   packet.items.forEach((it, i) => {
     const p = `items[${i}]`;
+    // An item decided in an earlier pass is frozen context: nothing to advise on it.
+    if (it.decided) return;
     if (!it.what && !it.soWhat && !it.nowWhat && !it.changes?.length) {
       out.push({
         path: p,
@@ -714,7 +829,21 @@ export function advise(packet: Packet): Advice[] {
     });
     (it.nowWhat?.edits ?? []).forEach((e, j) => {
       verbatim(e.path, e.before, `${p}.nowWhat.edits[${j}].before`, '"before"');
+      const t = text.get(e.path);
+      const cut = t === undefined ? null : boundaryCut(t, e);
+      if (cut) out.push({ path: `${p}.nowWhat.edits[${j}].before`, message: `${it.id}: ${cut}` });
     });
+    // An edit the decision makes belongs in nowWhat.edits, where the human sees its wording —
+    // never only in prose ("the agent makes that consequential edit").
+    for (const k of ['summary', 'ifAccepted'] as const) {
+      const m = PROMISED_EDIT.exec(it.nowWhat?.[k] ?? '');
+      if (m) {
+        out.push({
+          path: `${p}.nowWhat.${k}`,
+          message: `${it.id}: "${m[0]}" — if that is an edit beyond nowWhat.edits, write it as an edit so the human rules on its wording`,
+        });
+      }
+    }
     (it.nowWhat?.composed ?? []).forEach((cm, k) => {
       cm.edits.forEach((e, j) => {
         verbatim(e.path, e.before, `${p}.nowWhat.composed[${k}].edits[${j}].before`, '"before"');
@@ -739,10 +868,13 @@ type StateRules = {
   /** Enforce each verdict's required words (submit) or only shape (draft). */
   strict: boolean;
   packet?: Packet;
+  /** The decisions version the document declares: version 1 keeps its own verdict rules. */
+  version?: number;
 };
 
 function checkState(c: Checker, v: Record<string, unknown>, rules: StateRules): void {
   const { strict, packet } = rules;
+  const v1 = rules.version === 1;
   if (strict) c.string(v.reviewer, 'reviewer', { nonEmpty: true });
   else c.string(v.reviewer, 'reviewer');
   c.optString(v.comment, 'comment');
@@ -755,10 +887,7 @@ function checkState(c: Checker, v: Record<string, unknown>, rules: StateRules): 
       'a branch review needs an overall verdict (approve, request-changes, or comment)',
     );
   }
-  const items = packet ? new Set(packet.items.map((i) => i.id)) : null;
-  const sections = packet
-    ? new Map(packet.items.map((i) => [i.id, new Set(i.sections.map((s) => s.key))]))
-    : null;
+  const byId = packet ? new Map(packet.items.map((i) => [i.id, i])) : null;
   const files = packet ? new Set(packet.files.map((f) => f.path)) : null;
 
   if (c.array(v.verdicts, 'verdicts')) {
@@ -769,15 +898,28 @@ function checkState(c: Checker, v: Record<string, unknown>, rules: StateRules): 
       if (c.string(x.item, `${p}.item`, { nonEmpty: true })) {
         if (seen.has(x.item)) c.fail(`${p}.item`, `more than one verdict for "${x.item}"`);
         seen.add(x.item);
-        if (items && !items.has(x.item)) c.fail(`${p}.item`, `"${x.item}" is not in the packet`);
+        const it = byId?.get(x.item);
+        if (byId && !it) c.fail(`${p}.item`, `"${x.item}" is not in the packet`);
+        else if (it?.decided) {
+          c.fail(`${p}.item`, `"${x.item}" was decided in an earlier pass; it is context only`);
+        }
       }
-      for (const k of ['wording', 'why', 'ruling', 'request', 'note'] as const) {
-        c.optString(x[k], `${p}.${k}`);
-      }
-      if (c.oneOf(x.verdict, VERDICTS, `${p}.verdict`) && strict) {
-        const need = REQUIRED_WORDS[x.verdict];
+      for (const k of WORDS_FIELDS) c.optString(x[k], `${p}.${k}`);
+      if (!c.oneOf(x.verdict, v1 ? VERDICTS_V1 : VERDICTS, `${p}.verdict`)) return;
+      const kind = x.verdict as VerdictKind;
+      const own = VERDICT_WORDS[kind].field;
+      if (strict) {
+        const need = requiredWords(kind);
         if (need && (typeof x[need] !== 'string' || (x[need] as string).trim() === '')) {
-          c.fail(`${p}.${need}`, `a "${x.verdict}" verdict needs its ${need}`);
+          c.fail(`${p}.${need}`, `${verdictName(kind)} needs its ${need}`);
+        }
+        // Version 2: one box per verdict, so a second words field is a mistake to name.
+        if (!v1) {
+          for (const k of WORDS_FIELDS) {
+            if (k !== own && typeof x[k] === 'string' && (x[k] as string).trim() !== '') {
+              c.fail(`${p}.${k}`, `${verdictName(kind)} carries only its ${own}, not ${k}`);
+            }
+          }
         }
       }
     });
@@ -794,20 +936,31 @@ function checkState(c: Checker, v: Record<string, unknown>, rules: StateRules): 
       }
       if (c.object(a.target, `${p}.target`)) {
         const t = a.target;
-        if (c.oneOf(t.kind, ['file', 'item'] as const, `${p}.target.kind`)) {
+        const kinds = v1 ? (['file', 'item'] as const) : (['file', 'item', 'field'] as const);
+        if (c.oneOf(t.kind, kinds, `${p}.target.kind`)) {
           if (t.kind === 'file') {
             if (c.string(t.path, `${p}.target.path`, { nonEmpty: true }) && files) {
               if (!files.has(t.path))
                 c.fail(`${p}.target.path`, `"${t.path}" is not in the packet`);
             }
-          } else {
+          } else if (t.kind === 'item') {
             const okItem = c.string(t.item, `${p}.target.item`, { nonEmpty: true });
             const okSec = c.string(t.section, `${p}.target.section`, { nonEmpty: true });
-            if (okItem && okSec && sections) {
-              const keys = sections.get(t.item as string);
-              if (!keys) c.fail(`${p}.target.item`, `"${t.item}" is not in the packet`);
-              else if (!keys.has(t.section as string)) {
+            if (okItem && okSec && byId) {
+              const it = byId.get(t.item as string);
+              if (!it) c.fail(`${p}.target.item`, `"${t.item}" is not in the packet`);
+              else if (!it.sections.some((s) => s.key === t.section)) {
                 c.fail(`${p}.target.section`, `"${t.section}" is not a section of "${t.item}"`);
+              }
+            }
+          } else {
+            const okItem = c.string(t.item, `${p}.target.item`, { nonEmpty: true });
+            const okField = c.string(t.field, `${p}.target.field`, { nonEmpty: true });
+            if (okItem && okField && byId) {
+              const it = byId.get(t.item as string);
+              if (!it) c.fail(`${p}.target.item`, `"${t.item}" is not in the packet`);
+              else if (fieldText(it, t.field as string) === undefined) {
+                c.fail(`${p}.target.field`, `"${t.field}" names no text in "${t.item}"`);
               }
             }
           }
@@ -823,7 +976,7 @@ function checkState(c: Checker, v: Record<string, unknown>, rules: StateRules): 
         c.int(a.at.end, `${p}.at.end`);
         c.int(a.at.line, `${p}.at.line`, 1);
       }
-      if (a.item !== undefined && c.string(a.item, `${p}.item`) && items && !items.has(a.item)) {
+      if (a.item !== undefined && c.string(a.item, `${p}.item`) && byId && !byId.has(a.item)) {
         c.fail(`${p}.item`, `"${a.item}" is not in the packet`);
       }
       const kindOk = c.oneOf(a.kind, ANNOTATION_KINDS, `${p}.kind`);
@@ -837,6 +990,9 @@ function checkState(c: Checker, v: Record<string, unknown>, rules: StateRules): 
     });
   }
 }
+
+/** "an accept-with-changes verdict", for messages. */
+const verdictName = (k: VerdictKind) => `${/^[aeiou]/.test(k) ? 'an' : 'a'} "${k}" verdict`;
 
 function checkPacketRef(c: Checker, v: unknown): void {
   if (!c.object(v, 'packet')) return;
@@ -856,23 +1012,39 @@ export function validateSubmission(v: unknown, packet: Packet): Result<ReviewSta
   return done(c, v);
 }
 
+/** A decisions file, version 2 (written by this release) or version 1 (read under its own rules). */
 export function validateDecisions(v: unknown, packet?: Packet): Result<Decisions> {
   const c = new Checker();
   if (!c.object(v, '$')) return done(c, v);
-  if (!c.header(v, DECISIONS_KIND, DECISIONS_VERSION)) return done(c, v);
+  if (!c.header(v, DECISIONS_KIND, DECISIONS_READ)) return done(c, v);
   checkPacketRef(c, v.packet);
   c.string(v.submittedAt, 'submittedAt', { nonEmpty: true });
-  checkState(c, v, packet ? { strict: true, packet } : { strict: true });
+  const version = v.version as number;
+  checkState(c, v, packet ? { strict: true, packet, version } : { strict: true, version });
   return done(c, v);
 }
 
 export function validateDraft(v: unknown): Result<Draft> {
   const c = new Checker();
   if (!c.object(v, '$')) return done(c, v);
-  if (!c.header(v, DRAFT_KIND, DECISIONS_VERSION)) return done(c, v);
+  if (!c.header(v, DRAFT_KIND, DECISIONS_READ)) return done(c, v);
   checkPacketRef(c, v.packet);
-  checkState(c, v, { strict: false });
+  checkState(c, v, { strict: false, version: v.version as number });
   return done(c, v);
+}
+
+/**
+ * A version 1 draft's verdicts in version 2's shape: a note written beside another
+ * verdict's words joins them (version 2 has one box per verdict), so nothing typed is lost.
+ */
+export function upgradeVerdicts(verdicts: Verdict[]): Verdict[] {
+  return verdicts.map((x) => {
+    const own = VERDICT_WORDS[x.verdict]?.field;
+    if (!own || own === 'note' || !x.note?.trim()) return x;
+    const { note, ...rest } = x;
+    const words = rest[own]?.trim() ? `${rest[own]}\n\n${note}` : (note as string);
+    return { ...rest, [own]: words };
+  });
 }
 
 export function packetRef(packet: Packet, digest: string): PacketRef {
@@ -911,22 +1083,23 @@ function pick<T extends object>(v: T, keys: readonly (keyof T)[]): T {
   return out;
 }
 
-/** A verdict carries only the words its kind uses (plus a note). */
+/** A verdict carries only its own words field, and only when it has words. */
 function cleanVerdict(v: Verdict): Verdict {
-  const need = REQUIRED_WORDS[v.verdict];
+  const own = VERDICT_WORDS[v.verdict].field;
   const keys: (keyof Verdict)[] = ['item', 'verdict'];
-  if (need) keys.push(need);
-  if (v.verdict === 'defer' && v.ruling?.trim()) keys.push('ruling');
-  if (v.note?.trim()) keys.push('note');
+  if (VERDICT_WORDS[v.verdict].required || v[own]?.trim()) keys.push(own);
   return pick(v, keys);
 }
 
 function cleanAnnotation(a: Annotation): Annotation {
   const out = pick(a, ['id', 'target', 'item', 'selector', 'at', 'kind', 'comment', 'createdAt']);
+  const t = a.target;
   out.target =
-    a.target.kind === 'file'
-      ? { kind: 'file', path: a.target.path }
-      : { kind: 'item', item: a.target.item, section: a.target.section };
+    t.kind === 'file'
+      ? { kind: 'file', path: t.path }
+      : t.kind === 'item'
+        ? { kind: 'item', item: t.item, section: t.section }
+        : { kind: 'field', item: t.item, field: t.field };
   out.selector = { exact: a.selector.exact, prefix: a.selector.prefix, suffix: a.selector.suffix };
   if (a.kind === 'suggestion' && a.suggestion !== undefined) out.suggestion = a.suggestion;
   return out;

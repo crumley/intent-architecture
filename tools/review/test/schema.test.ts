@@ -2,11 +2,13 @@ import { describe, expect, test } from 'bun:test';
 import {
   type Annotation,
   advise,
+  boundaryCut,
   collisions,
   draftQuestion,
   type Item,
   type Packet,
   toDecisions,
+  upgradeVerdicts,
   validateDecisions,
   validateDraft,
   validatePacket,
@@ -380,6 +382,69 @@ const SUBMIT_CASES: [string, Record<string, unknown>, string[]][] = [
     [],
   ],
   ['duplicate annotation id', state({ annotations: [ann(), ann()] }), ['annotations[1].id']],
+  // decisions version 2: accept with changes, one box per verdict, notes on agent text
+  [
+    'accept with changes needs its instructions',
+    state({ verdicts: [{ item: '0001-x/IF-001', verdict: 'accept-with-changes' }] }),
+    ['verdicts[0].instructions'],
+  ],
+  [
+    'accept with changes, instructed',
+    state({
+      verdicts: [
+        {
+          item: '0001-x/IF-001',
+          verdict: 'accept-with-changes',
+          instructions: 'say what hygiene means',
+        },
+      ],
+    }),
+    [],
+  ],
+  [
+    'accept may carry a note',
+    state({ verdicts: [{ item: '0001-x/IF-001', verdict: 'accept', note: 'keep it short' }] }),
+    [],
+  ],
+  [
+    'a verdict carries only its own box',
+    state({
+      verdicts: [{ item: '0001-x/IF-001', verdict: 'amend', wording: 'new', note: 'also this' }],
+    }),
+    ['verdicts[0].note'],
+  ],
+  [
+    'a note on agent-written text',
+    state({
+      annotations: [ann({ target: { kind: 'field', item: '0001-x/IF-001', field: 'what.facts' } })],
+    }),
+    [],
+  ],
+  [
+    'a note on an edit’s proposed wording',
+    state({
+      annotations: [
+        ann({ target: { kind: 'field', item: '0001-x/IF-001', field: 'nowWhat.edits[0].after' } }),
+      ],
+    }),
+    [],
+  ],
+  [
+    'a field must name text in the item',
+    state({
+      annotations: [
+        ann({ target: { kind: 'field', item: '0001-x/IF-001', field: 'nowWhat.edits[3].after' } }),
+      ],
+    }),
+    ['annotations[0].target.field'],
+  ],
+  [
+    'a field path names text, not an object',
+    state({
+      annotations: [ann({ target: { kind: 'field', item: '0001-x/IF-001', field: 'what' } })],
+    }),
+    ['annotations[0].target.field'],
+  ],
 ];
 
 describe('validatePacket', () => {
@@ -395,6 +460,61 @@ describe('validateSubmission (strict, against the packet)', () => {
   test.each(SUBMIT_CASES)('%s', (_name, s, paths) => {
     const r = validateSubmission(s, packet());
     expect(r.ok ? [] : r.errors.map((e) => e.path)).toEqual(paths);
+  });
+  test('an item decided in an earlier pass is not ruled again', () => {
+    const p = packet();
+    (p.items[0] as Item).decided = { verdict: 'accept', by: 'Rae', on: '2026-11-08', pass: 1 };
+    expect(validatePacket(p).ok).toBe(true);
+    const r = validateSubmission(
+      state({ verdicts: [{ item: '0001-x/IF-001', verdict: 'accept' }] }),
+      p,
+    );
+    expect(r.ok ? [] : r.errors.map((e) => e.path)).toEqual(['verdicts[0].item']);
+  });
+});
+
+describe('decisions version 1 is still read, under its own rules', () => {
+  const v1 = (verdicts: unknown[], annotations: unknown[] = []) => ({
+    kind: 'intent-review-decisions',
+    version: 1,
+    packet: REF,
+    reviewer: 'Rae',
+    submittedAt: '2026-11-07T01:00:00.000Z',
+    verdicts,
+    annotations,
+  });
+  test('a note beside any verdict is fine in version 1', () => {
+    const d = v1([{ item: 'x', verdict: 'amend', wording: 'w', note: 'n' }]);
+    expect(validateDecisions(d).ok).toBe(true);
+  });
+  test('version 1 knows neither accept-with-changes nor field targets', () => {
+    const d = v1(
+      [{ item: 'x', verdict: 'accept-with-changes', instructions: 'i' }],
+      [
+        {
+          ...ann({ target: { kind: 'field', item: 'x', field: 'what.facts' } }),
+        },
+      ],
+    );
+    const r = validateDecisions(d);
+    expect(r.ok ? [] : r.errors.map((e) => e.path)).toEqual([
+      'verdicts[0].verdict',
+      'annotations[0].target.kind',
+    ]);
+  });
+  test('a version 1 draft’s note joins its verdict’s one box', () => {
+    expect(
+      upgradeVerdicts([
+        { item: 'x', verdict: 'revise', request: 'rework it', note: 'and this' },
+        { item: 'y', verdict: 'accept', note: 'kept' },
+      ]),
+    ).toEqual([
+      { item: 'x', verdict: 'revise', request: 'rework it\n\nand this' },
+      { item: 'y', verdict: 'accept', note: 'kept' },
+    ]);
+  });
+  test('the page writes version 2', () => {
+    expect(toDecisions(state(), REF, '2026-11-07T01:00:00.000Z').version).toBe(2);
   });
 });
 
@@ -458,7 +578,8 @@ describe('drafts and decisions', () => {
     expect('comment' in d).toBe(false);
     expect(d.verdicts).toEqual([
       { item: '0001-x/IF-001', verdict: 'decline', why: 'no' },
-      { item: '0001-x/IF-002', verdict: 'defer', ruling: 'shared by design', note: 'later' },
+      // version 2: one box per verdict — a defer carries its ruling, not a note beside it
+      { item: '0001-x/IF-002', verdict: 'defer', ruling: 'shared by design' },
     ]);
     expect(Object.keys(d.annotations[0] as object).sort()).toEqual([
       'at',
@@ -542,6 +663,45 @@ describe('advise: what a valid packet still lacks', () => {
       ),
     );
     expect(m).toContainEqual(expect.stringContaining('items[1].ruled'));
+  });
+
+  test('an edit promised in prose, not written as an edit, is named', () => {
+    const p = packet();
+    const a = p.items[0] as Item;
+    (a.nowWhat as NonNullable<Item['nowWhat']>).summary =
+      'Name both acts; the agent makes that consequential edit to the glossary too.';
+    expect(messages(p)).toContainEqual(expect.stringContaining('items[0].nowWhat.summary'));
+    (a.nowWhat as NonNullable<Item['nowWhat']>).summary = 'Name both acts, as the edit shows.';
+    expect(messages(p).some((m) => m.includes('nowWhat.summary'))).toBe(false);
+  });
+
+  test('an insertion after a "before" that stops mid-sentence is named', () => {
+    const text = '- **Map a reference** back to a live session for resume, and re-create it.\n';
+    expect(
+      boundaryCut(text, {
+        path: 'x',
+        before: '- **Map a reference** back',
+        after: '- **Map a reference** back (verified)',
+      }),
+    ).toContain('stops mid-sentence');
+    expect(
+      boundaryCut(text, {
+        path: 'x',
+        before: 'and re-create it.',
+        after: 'and re-create it. New.',
+      }),
+    ).toBeNull();
+    expect(boundaryCut(text, { path: 'x', before: 'ap a reference', after: 'x' })).toContain(
+      'inside a word',
+    );
+    expect(boundaryCut(text, { path: 'x', before: 'for resume', after: 'to attach' })).toBeNull();
+  });
+
+  test('an item decided in an earlier pass gets no advice', () => {
+    const p = packet();
+    const b = p.items[1] as Item;
+    b.decided = { verdict: 'accept', by: 'Rae', on: '2026-11-08' };
+    expect(messages(p)).toEqual([]);
   });
 
   test('a quote or "before" not verbatim, or ambiguous, is named', () => {
