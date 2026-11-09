@@ -38,6 +38,21 @@ what/why, not a build choice.
    to it rather than restating it. (Each file's _Canonical home for_ section declares what it owns.)
    A genuinely two-sided contract states each side once, on its own side, and links.
 
+## Standing watches
+
+Two checks never settle, so they are kept here as practice rather than as open questions:
+
+- **Boundary drift, in both directions.** As [`../design/`](../design/) fills in, tool names creep
+  into this tree, and durable constraints get stranded down in design. Look both ways at every scope
+  boundary — a design entry accepted, a slice edited — and move whatever has crossed: lift a
+  stranded constraint into its slice, push a build choice down to the design entry that makes it.
+  _Why:_ the line erodes one reasonable sentence at a time, and a constraint stranded in design is
+  lost when its tool is swapped.
+- **Slice granularity.** Split a slice when it owns ideas a reader needs apart; merge two when
+  neither reads without the other — renumbering neighbors and relinking, so the reading order and
+  the one-home rule stay true. _Why:_ the first split into concepts and seams is drawn before the
+  build, and where a slice's seams belong is learned by using it.
+
 ## Reading order
 
 Directories and files are **numbered in the order to read them** — `00-`, `01-`, `02-` … sort into

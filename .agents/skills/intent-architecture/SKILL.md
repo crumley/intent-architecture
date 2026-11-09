@@ -98,7 +98,7 @@ repo/
 ├── README.md                      # the four legs + how to use the repo
 │
 ├── intent/                        # GOVERNS the other three — the what & why
-│   ├── README.md                  # the what/why-vs-how line; the rules; reading order
+│   ├── README.md                  # the what/why-vs-how line; the rules; standing watches; reading order
 │   ├── 00-foundation/             # GLOBAL intent
 │   │   ├── 00-vision.md           #   why the system exists, the problem, non-goals
 │   │   ├── 01-principles.md       #   cross-cutting invariants every slice honors (+why)
@@ -351,8 +351,9 @@ relative cross-reference resolves.
 
 The structure is now the **living contract** for the repo going forward, not a one-time artifact.
 Tell the user the maintenance loop: changes flow `intent → design → src/test`; touching `intent`
-means understanding changed; every idea keeps one home; every choice keeps its _why_. Point them at
-`AGENTS.md` as the entry point.
+means understanding changed; every idea keeps one home; every choice keeps its _why_; the standing
+watches in `intent/README.md` are repeated at every scope boundary. Point them at `AGENTS.md` as the
+entry point.
 
 ---
 

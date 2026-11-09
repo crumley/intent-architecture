@@ -169,6 +169,8 @@ Stable headings matter — they serve the agent audience and make the corpus nav
   it is a guide, not vocabulary policing.
 - **The three groupings** table.
 - **The two governing rules** (what/why vs. how; one home per idea).
+- **Standing watches** — the checks that never settle (boundary drift both ways; slice granularity),
+  kept as practice rather than open questions.
 - **Reading order** (and the recommended walkthrough, if present — a concrete scenario is intent
   text a builder can rule against, and a gap shows up as a step the walkthrough cannot narrate).
 
@@ -200,9 +202,9 @@ Header line: `Layer: intent · foundation (global). The what & why.`
 ### `intent/00-foundation/open-questions.md`
 
 - Only **cross-cutting** tensions (span multiple slices).
-- A tension that is a **standing watch** — a check to repeat at every boundary, not a question to
-  settle — says so with `_Standing watch._` after its title. It stays listed and read; review
-  tooling leaves it out of the queue, so it is not re-asked every pass.
+- Only questions to settle. A check to repeat is not an open question: it belongs in
+  `intent/README.md`'s _Standing watches_. A tree that still marks one `_Standing watch._` here
+  reads correctly, and review tooling still skips it.
 - An **index of per-slice open questions** (pointers into each slice's own _Open questions_).
 
 ### `intent/01-concepts/NN-<concept>.md` (template: `templates/intent-concept.md`)
@@ -413,6 +415,23 @@ from the intent, and "the spec" always meant the intent — so it is now **inten
 Tools and agents **accept the legacy spelling when reading** — an `SF-NNN` id, a `spec-feedback.md`
 file, or an "SF" in a dated record means the same item as its `IF-NNN` form — and **write only the
 new one**.
+
+### Upgrading a repo: standing watches
+
+Earlier versions of this structure seeded the boundary-drift check as an open question marked
+`_Standing watch._`. A check to repeat is practice, not a question to settle, so it now lives in
+`intent/README.md`'s _Standing watches_. To upgrade a repo on the older shape:
+
+1. **Add the Standing watches section** to `intent/README.md`, after _The two governing rules_ —
+   boundary drift in both directions, and slice granularity, each with its _why_ (copy the section
+   from `templates/intent-README.md`; a repo-specific example of a crossing, in a parenthetical, is
+   welcome where one is apt).
+2. **Move every standing-watch open question into it** — anything marked `_Standing watch._`, and
+   any open question that is really a check to repeat (boundary drift, slice granularity) — and
+   remove it from `open-questions.md` and from any slice's _Open questions_. Merge it into the
+   matching watch rather than duplicating one; a watch the repo has that the generic two do not
+   cover becomes a third bullet.
+3. **Fix the links** that pointed at the moved item, and run the repo's link check.
 
 ### The delivery shape for agent-built entries
 
